@@ -858,6 +858,7 @@ export default function Dashboard({ alerts = [] }) {
   );
   const [routes, setRoutes] = useState(ROUTES_SEED);
   const [backendAlerts, setBackendAlerts] = useState([]);
+  const [liveConnStatus, setLiveConnStatus] = useState('connecting'); // 'connecting' | 'live' | 'reconnecting' - see fetchAlerts
   const [liveHazards, setLiveHazards] = useState([]);
 
   // Combines two genuinely different sources: locally-queued offline/SMS-
@@ -1077,8 +1078,18 @@ export default function Dashboard({ alerts = [] }) {
         prevBackendIdsRef.current = new Set(rows.map((r) => r.id));
       }
       setBackendAlerts(rows);
+      setLiveConnStatus('live');
     } catch (err) {
       console.warn('Live SOS fetch failed:', err);
+      // Doesn't clear backendAlerts - a transient failure (the free-tier
+      // backend cold-starting after ~15min idle takes 10-15s+ to answer,
+      // observed directly against production) shouldn't make already-loaded
+      // real SOS vanish from the feed. It does flip the header's status dot
+      // though (see liveConnStatus below) - the dot used to be a hardcoded
+      // permanent green pulse regardless of whether this fetch was actually
+      // succeeding, which made a real backend outage/cold-start look
+      // indistinguishable from "confirmed zero SOS, everything's fine."
+      setLiveConnStatus('reconnecting');
     }
   };
 
@@ -1434,13 +1445,26 @@ export default function Dashboard({ alerts = [] }) {
             <CheckCircle2 size={15} /> Recovery Analytics
           </button>
 
-          <div className="hidden items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2 text-xs text-slate-300 lg:flex">
+          <div
+            className="hidden items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2 text-xs text-slate-300 lg:flex"
+            title={
+              liveConnStatus === 'reconnecting'
+                ? "Lost contact with the live SOS feed - retrying automatically. The free-tier backend can take 10-15s to wake up after being idle; already-loaded alerts stay on screen while this reconnects."
+                : 'Connected to the live SOS feed'
+            }
+          >
             <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+              <span
+                className={cx(
+                  'absolute inline-flex h-full w-full animate-ping rounded-full opacity-75',
+                  liveConnStatus === 'reconnecting' ? 'bg-amber-400' : 'bg-emerald-400'
+                )}
+              />
+              <span className={cx('relative inline-flex h-2 w-2 rounded-full', liveConnStatus === 'reconnecting' ? 'bg-amber-500' : 'bg-emerald-500')} />
             </span>
             <Clock size={13} />
             {now.toLocaleTimeString('en-IN', { hour12: false })}
+            {liveConnStatus === 'reconnecting' && <span className="font-semibold text-amber-400">Reconnecting…</span>}
           </div>
         </div>
       </header>
