@@ -39,7 +39,7 @@ const HUBS = [
 // from the backend before going offline, not hardcoded here. ---
 const HAZARD_ZONES = [];
 
-const ROUTE_TIMEOUT_MS = 18000; // real call scores 3 TomTom candidates x live rainfall+elevation each - measured ~9-10s, was timing out at 8s
+const ROUTE_TIMEOUT_MS = 40000; // real call scores 3 TomTom candidates x live rainfall+elevation each - measured ~9-10s on local dev, but the deployed Render backend measured ~25s for a real long-distance route (Delhi-Chennai) - cross-region network latency to TomTom/Open-Meteo from Render's servers, not a bug - 18s (the old value, tuned only against local timing) was silently falling back to the offline estimate on every real deployed request for any non-trivial distance
 const GEOLOCATION_TIMEOUT_MS = 8000;
 const AVG_OFFLINE_SPEED_KMH = 42; // used for offline cached ETA estimates
 const ROAD_WINDING_FACTOR = 1.35; // straight-line -> approximate hill-road distance
