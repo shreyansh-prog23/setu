@@ -1,0 +1,97 @@
+"""
+WhatsApp Voice SOS ingestion: transcribes an inbound voice note with Groq
+Whisper, extracts a structured triage summary with Llama 3.3, and persists
+it as a normal SOS alert (source="whatsapp_voice") so it flows through the
+existing /api/alerts feed and Command Center map like any other SOS.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+from functools import lru_cache
+from typing import Optional, Tuple
+
+from groq import AsyncGroq
+
+import database
+from geocoding import geocode_one
+
+logger = logging.getLogger("voice_service")
+
+# Used only if a caller supplies no lat/lon AND the real geocoding lookup
+# below fails/finds nothing (e.g. speech-to-text mangled the place name
+# beyond recognition, or the network call failed) - India's geographic
+# centroid, not a guessed specific place, so a failed lookup doesn't
+# silently pretend precision it doesn't have.
+DEFAULT_FALLBACK_COORDS = (22.9734, 78.6569)
+
+TRIAGE_PROMPT = (
+    "You are a disaster-response triage assistant for India. Read "
+    "the transcript of a distress call and extract a JSON object with exactly "
+    "these keys: incident_type (short string), urgency "
+    "('CRITICAL'|'HIGH'|'MODERATE'), spoken_location (place name mentioned in "
+    "the call, or empty string), action_needed (short string - what "
+    "responders should do first), summary (one sentence). The transcript comes "
+    "from speech-to-text and may mishear place names - normalize any "
+    "phonetically garbled Indian place name to its standard spelling before "
+    "returning spoken_location. Respond with JSON only."
+)
+
+
+@lru_cache
+def _client() -> AsyncGroq:
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        raise RuntimeError("GROQ_API_KEY is not set - required for WhatsApp voice SOS transcription.")
+    return AsyncGroq(api_key=api_key)
+
+
+async def _geocode(spoken_location: str, lat: Optional[float], lon: Optional[float]) -> Tuple[float, float]:
+    if lat is not None and lon is not None:
+        return lat, lon
+    if spoken_location:
+        resolved = await geocode_one(spoken_location)
+        if resolved is not None:
+            return resolved
+    return DEFAULT_FALLBACK_COORDS
+
+
+async def process_voice_sos(
+    audio_bytes: bytes,
+    phone: str = "",
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    filename: str = "sos.ogg",  # Twilio WhatsApp voice notes are ogg/opus; the upload endpoint passes the real filename
+) -> dict:
+    """Transcribes + triages a voice SOS clip and persists it to SQLite,
+    returning the same row shape as database.insert_sos_alert."""
+    client = _client()
+
+    transcript = await client.audio.transcriptions.create(file=(filename, audio_bytes), model="whisper-large-v3")
+
+    completion = await client.chat.completions.create(
+        model="openai/gpt-oss-120b",  # llama-3.3-70b-versatile is no longer served on this Groq account - see note below
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": TRIAGE_PROMPT},
+            {"role": "user", "content": transcript.text},
+        ],
+    )
+    triage = json.loads(completion.choices[0].message.content)
+
+    resolved_lat, resolved_lon = await _geocode(triage.get("spoken_location", ""), lat, lon)
+
+    return database.insert_sos_alert(
+        truck_id=phone,
+        latitude=resolved_lat,
+        longitude=resolved_lon,
+        cargo=triage.get("incident_type", "Unknown"),
+        reason=triage.get("action_needed", ""),
+        source="whatsapp_voice",
+        raw_message=transcript.text,
+        reported_by=phone,
+        urgency=triage.get("urgency", "MODERATE"),
+        action_needed=triage.get("action_needed", ""),
+        summary=triage.get("summary", ""),
+    )

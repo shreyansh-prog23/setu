@@ -1,0 +1,35 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Backend
+backend/.env
+*.db
+backend/__pycache__
+__pycache__
+
+# Claude Code local state - contains cached permission strings that can
+# include literal secrets from past commands (e.g. curl calls with an API
+# key inline), and is local tooling config, not project source anyway
+.claude/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
