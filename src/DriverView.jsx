@@ -948,7 +948,7 @@ export default function DriverView({ onTriggerSOS }) {
   // Incident Report modal — both capture live GPS and POST to /api/sos.
   const dispatchIncident = async ({ category, severity, note, source }) => {
     const isOffline = !online;
-    setActiveModal(isOffline ? 'sos-offline' : 'sos-online');
+    if (isOffline) setActiveModal('sos-offline');
 
     const { lat, lng, anchorLabel } = await getSosCoords();
     setLastDispatch({ lat, lng, category, severity, note });
@@ -978,11 +978,20 @@ export default function DriverView({ onTriggerSOS }) {
       dispatchSos(lat, lng, { incidentType: category, severity, notes: note, mode: source }).catch(() => {});
       setToast('SOS queued — will send automatically once signal returns');
     } else {
+      // Success is shown only once the send is actually confirmed - this
+      // used to show "Instant SOS Dispatched" unconditionally before even
+      // attempting the send, so a real failure (expired session, dropped
+      // connection, a cold-starting backend) looked identical to success
+      // and gave the driver zero warning that dispatchSos below had queued
+      // it for silent background retry instead.
+      let delivered = false;
       try {
         await dispatchSos(lat, lng, { incidentType: category, severity, notes: note, mode: source });
+        delivered = true;
       } catch (err) {
-        console.warn('SOS backend dispatch failed:', err);
+        console.warn('SOS backend dispatch failed, queued for automatic retry:', err);
       }
+      setActiveModal(delivered ? 'sos-online' : 'sos-online-failed');
 
       onTriggerSOS?.({
         id: `SOS-${Date.now().toString().slice(-4)}`,
@@ -1003,7 +1012,11 @@ export default function DriverView({ onTriggerSOS }) {
             : `${category} reported along the active route. Severity: ${severity}.`,
         time: 'Just now',
       });
-      setToast(`🚨 Dispatched! Live GPS: [${lat.toFixed(4)}, ${lng.toFixed(4)}] transmitted to emergency network`);
+      setToast(
+        delivered
+          ? `🚨 Dispatched! Live GPS: [${lat.toFixed(4)}, ${lng.toFixed(4)}] transmitted to emergency network`
+          : 'Could not confirm delivery — queued, retrying automatically'
+      );
     }
 
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -1366,6 +1379,37 @@ export default function DriverView({ onTriggerSOS }) {
               <button
                 onClick={closeModal}
                 className="w-full rounded-lg bg-emerald-600 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-500"
+              >
+                Acknowledge
+              </button>
+            </div>
+          </Modal>
+        )}
+
+        {/* SOS dispatch failed (real send failed despite "4G Online" -
+            expired session, dropped connection, backend unreachable, etc).
+            Honest about the failure, distinct from the offline/SMS-fallback
+            modal since this is a genuine send failure, not a deliberate
+            no-signal simulation - the request is already queued (see
+            dispatchSos/offlineQueue.js) and will retry automatically. */}
+        {activeModal === 'sos-online-failed' && (
+          <Modal onClose={closeModal}>
+            <div className="space-y-3 text-center">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-500/15">
+                <AlertTriangle size={26} className="text-amber-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-100">Couldn't Confirm Delivery</h3>
+                <p className="mt-1 text-xs text-slate-400">
+                  Your report is queued and will send automatically the moment a connection succeeds — it has not been lost.
+                </p>
+              </div>
+              {pendingCount > 0 && (
+                <p className="text-[11px] text-amber-300">{pendingCount} report{pendingCount > 1 ? 's' : ''} pending delivery</p>
+              )}
+              <button
+                onClick={closeModal}
+                className="w-full rounded-lg bg-amber-600 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-500"
               >
                 Acknowledge
               </button>

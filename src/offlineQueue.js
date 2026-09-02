@@ -62,6 +62,17 @@ export async function flushPendingRequests() {
 
 if (typeof window !== 'undefined') {
   window.addEventListener('online', flushPendingRequests);
+  // Mobile browsers throttle/suspend setInterval timers heavily once a tab
+  // is backgrounded or the screen locks - a queued SOS could otherwise sit
+  // untouched until the 30s poll happens to land in a moment the tab is
+  // foregrounded, which on a real phone can be a long, unpredictable wait.
+  // Retrying the instant the driver reopens/refocuses the app (a real,
+  // observable moment, not a guess) closes that gap without needing them to
+  // manually reload.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') flushPendingRequests();
+  });
+  window.addEventListener('focus', flushPendingRequests);
   flushPendingRequests(); // in case connectivity was already back before this module loaded
   setInterval(flushPendingRequests, RETRY_INTERVAL_MS);
 }
