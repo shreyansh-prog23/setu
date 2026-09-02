@@ -1361,11 +1361,19 @@ export default function Dashboard({ alerts = [] }) {
   }, [sosPings, dispatched, resolved]);
 
   // Reconciles dispatched/resolved UI badges for REAL (BE-) alerts against
-  // the backend's own status on every fetch - without this, a real alert
-  // that was already dispatched/resolved before a refresh would visually
-  // revert to "Active" (the badge is driven by local state, which starts
-  // empty on load; the backend row itself was always correct in
-  // logistics.db, only the UI's read of it wasn't).
+  // the backend's own status on every fetch - the backend is the sole
+  // source of truth for these ids, so this both fills in a missing local
+  // entry AND corrects/clears a stale one, in either direction.
+  //
+  // The "clear a stale one" half is not hypothetical: the deployed backend
+  // (Render free tier, no persistent disk) loses its database on every
+  // redeploy, so ids restart from 1 - a brand new PENDING alert can land on
+  // the exact same "BE-1" this browser's localStorage still remembers as
+  // RESOLVED from a completely different alert in a previous deploy
+  // generation. Only ever adding (never correcting) meant that stale
+  // "resolved" from the old generation would permanently hide the new,
+  // unrelated alert with the same id - confirmed happening live: backend
+  // had 2 PENDING, Command Center showed "Active SOS: 0."
   useEffect(() => {
     if (!backendAlerts.length) return;
     setDispatched((prev) => {
@@ -1373,9 +1381,13 @@ export default function Dashboard({ alerts = [] }) {
       const next = { ...prev };
       for (const a of backendAlerts) {
         const id = `BE-${a.id}`;
-        if ((a.status === 'DISPATCHED' || a.status === 'RESOLVED') && !next[id]) {
+        const shouldBeDispatched = a.status === 'DISPATCHED' || a.status === 'RESOLVED';
+        if (shouldBeDispatched && !next[id]) {
           const { depotName, etaMin } = nearestQrtEta(a.lat, a.lng);
           next[id] = { depotName, etaMin, dispatchedAt: a.dispatched_at ? new Date(a.dispatched_at) : new Date() };
+          changed = true;
+        } else if (!shouldBeDispatched && next[id]) {
+          delete next[id];
           changed = true;
         }
       }
@@ -1396,6 +1408,9 @@ export default function Dashboard({ alerts = [] }) {
             lat: a.lat,
             lng: a.lng,
           };
+          changed = true;
+        } else if (a.status !== 'RESOLVED' && next[id]) {
+          delete next[id];
           changed = true;
         }
       }
