@@ -261,6 +261,16 @@ async function dispatchSos(lat, lng, details = {}) {
   // throw and get silently swallowed by the caller's catch block.
   try {
     const res = await apiFetch('/api/sos', requestOptions);
+    if (res.status === 401) {
+      // The session token is dead (not just this one request failing) -
+      // retrying with the same token would never succeed, so surface it
+      // immediately here rather than waiting for the next background
+      // flush pass to notice the same thing (see offlineQueue.js). The
+      // report itself still queues below so it auto-sends the moment the
+      // driver logs back in with a fresh token.
+      clearDriverSession();
+      window.dispatchEvent(new Event('driver-session-expired'));
+    }
     if (!res.ok) throw new Error(`SOS dispatch failed (${res.status})`);
   } catch (err) {
     queuePendingRequest('/api/sos', requestOptions);
@@ -450,7 +460,7 @@ function Modal({ onClose, children }) {
 // login itself needs connectivity - once logged in, the session token is
 // read from localStorage on every request (see apiClient.js), so the app
 // stays exactly as offline-capable as before for everything after this.
-function DriverLoginGate({ onLoggedIn }) {
+function DriverLoginGate({ onLoggedIn, notice }) {
   const [step, setStep] = useState('phone'); // 'phone' | 'code'
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
@@ -509,6 +519,13 @@ function DriverLoginGate({ onLoggedIn }) {
           <h1 className="text-sm font-bold text-slate-100">Driver Login</h1>
           <p className="text-[12px] text-slate-500">Verify your phone once — stays signed in until you sign out.</p>
         </div>
+
+        {notice && (
+          <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] text-amber-300">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            <span>{notice}</span>
+          </div>
+        )}
 
         {step === 'phone' ? (
           <div className="space-y-3">
@@ -671,6 +688,7 @@ function RoutePreviewMap({ coordinates, hazards, hazardDetected }) {
 
 export default function DriverView({ onTriggerSOS }) {
   const [driverSession, setDriverSessionState] = useState(() => getDriverSession());
+  const [sessionExpiredNotice, setSessionExpiredNotice] = useState(null);
   const [pendingCount, setPendingCount] = useState(() => getPendingCount());
   const [online, setOnline] = useState(true);
   const [activeModal, setActiveModal] = useState(null); // 'sos-online' | 'sos-offline' | 'sos-report' | 'obstacle' | null
@@ -746,6 +764,24 @@ export default function DriverView({ onTriggerSOS }) {
       });
     });
     return unsubscribe;
+  }, []);
+
+  // A queued SOS/report can fail forever with a dead session token (see
+  // dispatchSos/offlineQueue.js - most commonly after the backend's
+  // database gets wiped by a redeploy, since Render's free tier has no
+  // persistent disk, orphaning every token issued before it). That code
+  // clears the stored token and fires this event instead of retrying
+  // blindly - drop back to the login gate so the driver visibly has to
+  // re-verify, rather than the app silently sitting "logged in" while
+  // every real send 401s. The queued report itself is untouched and will
+  // send automatically on the next retry once they're logged in again.
+  useEffect(() => {
+    const onExpired = () => {
+      setDriverSessionState(null);
+      setSessionExpiredNotice('Your session expired, likely after a server update. Please log in again — your queued report will send automatically once you do.');
+    };
+    window.addEventListener('driver-session-expired', onExpired);
+    return () => window.removeEventListener('driver-session-expired', onExpired);
   }, []);
 
   // Passive "entering a high-risk area" watch - runs the whole time this
@@ -1130,9 +1166,11 @@ export default function DriverView({ onTriggerSOS }) {
   if (!driverSession) {
     return (
       <DriverLoginGate
+        notice={sessionExpiredNotice}
         onLoggedIn={(token, phone) => {
           setDriverSession(token, phone);
           setDriverSessionState({ token, phone });
+          setSessionExpiredNotice(null);
         }}
       />
     );
