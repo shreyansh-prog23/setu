@@ -321,6 +321,48 @@ const DISTRICT_POOL = [
 // deliberately-added simulated ones (see addSimulatedSOS), not permanent fake data.
 const SOS_INITIAL = [];
 
+// Local-only SOS history (simulated demo SOS + their dispatch/resolve
+// outcomes) used to live purely in React state and vanish on every refresh -
+// real backend alerts never had this problem (their lifecycle is in
+// logistics.db), only the "Add Simulated SOS" demo path did. Persisted here
+// so a refresh mid-demo doesn't wipe it. Real (BE-) dispatched/resolved
+// entries get written here too (harmless/redundant with the backend) which
+// lets them render correctly immediately on load, before the first
+// fetchAlerts() reconciliation pass (see the effect near backendAlerts)
+// confirms them from the server.
+const SOS_HISTORY_STORAGE_KEY = 'setu_dashboard_sos_history';
+let cachedSosHistory; // module-level: parse localStorage once, not once per useState initializer
+function loadStoredSosHistory() {
+  if (cachedSosHistory !== undefined) return cachedSosHistory;
+  try {
+    const raw = localStorage.getItem(SOS_HISTORY_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    cachedSosHistory = parsed
+      ? {
+          sosPings: (parsed.sosPings || []).map((s) => ({ ...s, timestamp: new Date(s.timestamp) })),
+          dispatched: Object.fromEntries(
+            Object.entries(parsed.dispatched || {}).map(([id, d]) => [id, { ...d, dispatchedAt: new Date(d.dispatchedAt) }])
+          ),
+          resolved: Object.fromEntries(
+            Object.entries(parsed.resolved || {}).map(([id, r]) => [
+              id,
+              {
+                ...r,
+                resolvedAt: new Date(r.resolvedAt),
+                dispatchedAt: r.dispatchedAt ? new Date(r.dispatchedAt) : undefined,
+                receivedAt: r.receivedAt ? new Date(r.receivedAt) : undefined,
+              },
+            ])
+          ),
+        }
+      : null;
+  } catch (err) {
+    console.warn('Failed to read stored SOS history:', err);
+    cachedSosHistory = null;
+  }
+  return cachedSosHistory;
+}
+
 // Pan-India spread, matching ROUTES_SEED's corridors - was all 4 concentrated
 // in NE India.
 const ROAD_ALERTS = [
@@ -809,7 +851,7 @@ export default function Dashboard({ alerts = [] }) {
   const [now, setNow] = useState(() => new Date());
   const [convoys] = useState(CONVOYS_INITIAL);
   const [sosPings, setSosPings] = useState(
-    SOS_INITIAL.map((s) => ({ ...s, timestamp: new Date(Date.now() - s.ageMin * 60000) }))
+    () => loadStoredSosHistory()?.sosPings ?? SOS_INITIAL.map((s) => ({ ...s, timestamp: new Date(Date.now() - s.ageMin * 60000) }))
   );
   const [roadAlerts] = useState(
     ROAD_ALERTS.map((a) => ({ ...a, timestamp: new Date(Date.now() - a.ageMin * 60000) }))
@@ -949,8 +991,8 @@ export default function Dashboard({ alerts = [] }) {
       .finally(() => setDispatchingZoneId(null));
   };
   const [flashId, setFlashId] = useState(null);
-  const [dispatched, setDispatched] = useState({}); // { [sosId]: { depotName, etaMin, dispatchedAt } }
-  const [resolved, setResolved] = useState({}); // { [sosId]: { resolvedAt, outcomeType, outcomeNote } }
+  const [dispatched, setDispatched] = useState(() => loadStoredSosHistory()?.dispatched ?? {}); // { [sosId]: { depotName, etaMin, dispatchedAt } }
+  const [resolved, setResolved] = useState(() => loadStoredSosHistory()?.resolved ?? {}); // { [sosId]: { resolvedAt, outcomeType, outcomeNote } }
   const [resolvingId, setResolvingId] = useState(null); // sosId whose outcome-picker is expanded
   const [feedTab, setFeedTab] = useState('active'); // 'active' | 'resolved'
 
@@ -1295,6 +1337,60 @@ export default function Dashboard({ alerts = [] }) {
         .catch((err) => console.warn('Failed to persist SOS resolution:', err));
     }
   };
+
+  // Persists simulated-demo SOS + the local dispatch/resolve UI state to
+  // localStorage so "Add Simulated SOS" history survives a refresh instead
+  // of vanishing (see loadStoredSosHistory above for why this exists).
+  useEffect(() => {
+    try {
+      localStorage.setItem(SOS_HISTORY_STORAGE_KEY, JSON.stringify({ sosPings, dispatched, resolved }));
+    } catch (err) {
+      console.warn('Failed to persist SOS history:', err);
+    }
+  }, [sosPings, dispatched, resolved]);
+
+  // Reconciles dispatched/resolved UI badges for REAL (BE-) alerts against
+  // the backend's own status on every fetch - without this, a real alert
+  // that was already dispatched/resolved before a refresh would visually
+  // revert to "Active" (the badge is driven by local state, which starts
+  // empty on load; the backend row itself was always correct in
+  // logistics.db, only the UI's read of it wasn't).
+  useEffect(() => {
+    if (!backendAlerts.length) return;
+    setDispatched((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const a of backendAlerts) {
+        const id = `BE-${a.id}`;
+        if ((a.status === 'DISPATCHED' || a.status === 'RESOLVED') && !next[id]) {
+          const { depotName, etaMin } = nearestQrtEta(a.lat, a.lng);
+          next[id] = { depotName, etaMin, dispatchedAt: a.dispatched_at ? new Date(a.dispatched_at) : new Date() };
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    setResolved((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const a of backendAlerts) {
+        const id = `BE-${a.id}`;
+        if (a.status === 'RESOLVED' && !next[id]) {
+          next[id] = {
+            resolvedAt: a.resolved_at ? new Date(a.resolved_at) : new Date(),
+            outcomeType: a.outcome_type,
+            outcomeNote: a.outcome_note,
+            receivedAt: new Date(a.received_at),
+            dispatchedAt: a.dispatched_at ? new Date(a.dispatched_at) : undefined,
+            lat: a.lat,
+            lng: a.lng,
+          };
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [backendAlerts]);
 
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-slate-950 text-slate-100">
