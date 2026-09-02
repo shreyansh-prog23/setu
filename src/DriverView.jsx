@@ -984,7 +984,16 @@ export default function DriverView({ onTriggerSOS }) {
   // Incident Report modal — both capture live GPS and POST to /api/sos.
   const dispatchIncident = async ({ category, severity, note, source }) => {
     const isOffline = !online;
-    if (isOffline) setActiveModal('sos-offline');
+    // Immediate feedback the instant the hold completes/tap registers -
+    // without this, the gap between releasing the button and the real
+    // dispatchSos response landing (which on the deployed Render free tier
+    // can genuinely take several seconds, sometimes 10+) showed nothing at
+    // all on screen, reading exactly like "the SOS button does nothing."
+    // Fixing the earlier false-success bug (showing success before the
+    // send was even attempted) accidentally introduced this - honesty
+    // about the eventual result doesn't have to mean silence in the
+    // meantime.
+    setActiveModal(isOffline ? 'sos-offline' : 'sos-sending');
 
     const { lat, lng, anchorLabel } = await getSosCoords();
     setLastDispatch({ lat, lng, category, severity, note });
@@ -1379,6 +1388,24 @@ export default function DriverView({ onTriggerSOS }) {
             Report Road Obstacle
           </button>
         </div>
+
+        {/* Immediate feedback while the real send is in flight - see
+            dispatchIncident. Not dismissible (no-op onClose) so a driver
+            can't tap SOS again mid-send and fire a duplicate report while
+            waiting on a slow response. */}
+        {activeModal === 'sos-sending' && (
+          <Modal onClose={() => {}}>
+            <div className="space-y-3 text-center">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-sky-500/15">
+                <Loader2 size={26} className="animate-spin text-sky-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-100">Sending SOS…</h3>
+                <p className="mt-1 text-xs text-slate-400">Transmitting your location to the emergency network. This can take a few seconds.</p>
+              </div>
+            </div>
+          </Modal>
+        )}
 
         {/* SOS Online modal */}
         {activeModal === 'sos-online' && (
