@@ -8,7 +8,7 @@ import {
   Truck, AlertTriangle, MapPin, Radio, Search, Activity, Shield, Fuel,
   Package, HeartPulse, Wifi, WifiOff, X, Navigation, Clock, Siren, Plus,
   Building2, CloudRain, ZoomIn, ZoomOut, Layers, RefreshCw, CheckCircle2,
-  Mountain, Signal, ChevronRight, Flame,
+  Mountain, Signal, ChevronRight, Flame, MessageCircleOff,
 } from 'lucide-react';
 
 /* ------------------------------------------------------------------ *
@@ -1100,9 +1100,12 @@ export default function Dashboard({ alerts = [] }) {
   const flashTimer = useRef(null);
   const prevAlertsRef = useRef(alerts);
   const prevBackendIdsRef = useRef(null);
+  const prevRejectedIdsRef = useRef(null);
   const zoomInRef = useRef(() => {});
   const zoomOutRef = useRef(() => {});
   const resetViewRef = useRef(() => {});
+  const [rejectedNotice, setRejectedNotice] = useState(null); // { reason, phone } | null - see fetchRejected
+  const rejectedNoticeTimer = useRef(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -1110,6 +1113,7 @@ export default function Dashboard({ alerts = [] }) {
   }, []);
 
   useEffect(() => () => flashTimer.current && clearTimeout(flashTimer.current), []);
+  useEffect(() => () => rejectedNoticeTimer.current && clearTimeout(rejectedNoticeTimer.current), []);
 
   const fetchAlerts = async () => {
     try {
@@ -1135,6 +1139,33 @@ export default function Dashboard({ alerts = [] }) {
       // succeeding, which made a real backend outage/cold-start look
       // indistinguishable from "confirmed zero SOS, everything's fine."
       setLiveConnStatus('reconnecting');
+    }
+  };
+
+  // WhatsApp voice messages the backend's AI triage rejected as not a real
+  // emergency (see backend/voice_service.py) - never became an SOS alert,
+  // so there's nothing to show on the map/feed for these. Only surfaced as
+  // a brief notification so an operator knows the AI is actively filtering
+  // noise, not that something silently failed.
+  const fetchRejected = async () => {
+    try {
+      const res = await apiFetch(`/api/whatsapp/rejected`);
+      if (!res.ok) throw new Error(`rejected-messages fetch failed (${res.status})`);
+      const rows = await res.json();
+      if (prevRejectedIdsRef.current === null) {
+        prevRejectedIdsRef.current = new Set(rows.map((r) => r.id));
+        return;
+      }
+      const newOnes = rows.filter((r) => !prevRejectedIdsRef.current.has(r.id));
+      prevRejectedIdsRef.current = new Set(rows.map((r) => r.id));
+      if (newOnes.length > 0) {
+        const latest = newOnes[0];
+        setRejectedNotice({ reason: latest.reason, phone: latest.phone });
+        if (rejectedNoticeTimer.current) clearTimeout(rejectedNoticeTimer.current);
+        rejectedNoticeTimer.current = setTimeout(() => setRejectedNotice(null), 6000);
+      }
+    } catch (err) {
+      console.warn('Rejected-messages fetch failed:', err);
     }
   };
 
@@ -1190,10 +1221,12 @@ export default function Dashboard({ alerts = [] }) {
   useEffect(() => {
     fetchAlerts();
     fetchHazards();
+    fetchRejected();
     refreshCorridors();
     const liveDataTimer = setInterval(() => {
       fetchAlerts();
       fetchHazards();
+      fetchRejected();
     }, 8000);
     // 10min, not 60s - re-scoring 12 pan-India corridors (each up to 4 TomTom
     // candidates x multiple live weather/elevation lookups) every minute was
@@ -1465,6 +1498,25 @@ export default function Dashboard({ alerts = [] }) {
 
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
+      {/* WhatsApp false-alarm notification - deliberately neutral/gray, not
+          red, since this is the AI correctly filtering noise, not an
+          incident needing attention. Auto-dismisses; never blocks anything
+          underneath it. */}
+      {rejectedNotice && (
+        <div className="pointer-events-none fixed left-1/2 top-4 z-[2000] w-full max-w-sm -translate-x-1/2 px-4">
+          <div className="pointer-events-auto flex items-start gap-2 rounded-lg border border-slate-300 bg-white/95 p-3 text-xs shadow-2xl backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
+            <MessageCircleOff size={16} className="mt-0.5 shrink-0 text-slate-500 dark:text-slate-400" />
+            <div className="min-w-0 flex-1">
+              <div className="font-semibold text-slate-700 dark:text-slate-200">WhatsApp message rejected — not an emergency</div>
+              <div className="mt-0.5 truncate text-slate-500 dark:text-slate-400">{rejectedNotice.reason}</div>
+            </div>
+            <button onClick={() => setRejectedNotice(null)} className="shrink-0 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ---------------- Header ---------------- */}
       <header className="flex shrink-0 flex-col gap-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/70 px-4 py-3 backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <div className="flex items-center gap-3">

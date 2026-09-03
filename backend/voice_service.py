@@ -28,14 +28,20 @@ DEFAULT_FALLBACK_COORDS = (22.9734, 78.6569)
 
 TRIAGE_PROMPT = (
     "You are a disaster-response triage assistant for India. Read "
-    "the transcript of a distress call and extract a JSON object with exactly "
-    "these keys: incident_type (short string), urgency "
-    "('CRITICAL'|'HIGH'|'MODERATE'), spoken_location (place name mentioned in "
-    "the call, or empty string), action_needed (short string - what "
-    "responders should do first), summary (one sentence). The transcript comes "
-    "from speech-to-text and may mishear place names - normalize any "
-    "phonetically garbled Indian place name to its standard spelling before "
-    "returning spoken_location. Respond with JSON only."
+    "the transcript of an inbound WhatsApp voice message and extract a JSON "
+    "object with exactly these keys: is_emergency (boolean - true only if this "
+    "genuinely describes a disaster, accident, medical emergency, or someone in "
+    "danger needing help; false for casual chat, greetings, test messages, "
+    "wrong numbers, unrelated questions, or anything not describing a real "
+    "emergency), incident_type (short string, empty string if not an "
+    "emergency), urgency ('CRITICAL'|'HIGH'|'MODERATE', empty string if not an "
+    "emergency), spoken_location (place name mentioned in the call, or empty "
+    "string), action_needed (short string - what responders should do first, "
+    "empty string if not an emergency), summary (one sentence - if not an "
+    "emergency, briefly say what the message actually was instead). The "
+    "transcript comes from speech-to-text and may mishear place names - "
+    "normalize any phonetically garbled Indian place name to its standard "
+    "spelling before returning spoken_location. Respond with JSON only."
 )
 
 
@@ -79,6 +85,18 @@ async def process_voice_sos(
         ],
     )
     triage = json.loads(completion.choices[0].message.content)
+
+    # Fails open: a missing/malformed is_emergency key defaults to True
+    # (treated as a real emergency) rather than False - silently dropping a
+    # genuine SOS because of an LLM parsing quirk is a far worse failure
+    # mode here than occasionally letting a borderline/ambiguous message
+    # through to a human operator.
+    if not triage.get("is_emergency", True):
+        return {
+            "rejected": True,
+            "reason": triage.get("summary") or "The message did not appear to describe an emergency.",
+            "raw_message": transcript.text,
+        }
 
     resolved_lat, resolved_lon = await _geocode(triage.get("spoken_location", ""), lat, lon)
 

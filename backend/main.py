@@ -317,6 +317,15 @@ async def get_hazards():
     return database.get_active_hazards()
 
 
+@app.get("/api/whatsapp/rejected", dependencies=[Depends(verify_api_key)])
+async def get_rejected_voice_messages():
+    """Recent WhatsApp voice messages the AI triage classified as not a real
+    emergency (see /api/whatsapp-webhook) - never became an SOS alert, this
+    is purely so the Command Center can flash a brief notification about
+    them instead of them leaving zero trace anywhere."""
+    return database.get_recent_rejected_voice_messages()
+
+
 @app.post("/api/sos", response_model=Alert, dependencies=[Depends(verify_api_key)])
 async def create_sos(report: SOSReport, driver_phone: str = Depends(verify_driver_session)):
     return _make_alert(
@@ -399,20 +408,38 @@ async def whatsapp_webhook(
         lat = float(Latitude) if Latitude else None
         lon = float(Longitude) if Longitude else None
         row = await process_voice_sos(resp.content, phone=From, lat=lat, lon=lon)
-        _register_alert_row(row)
     except Exception as exc:
         logger.error("WhatsApp voice SOS processing failed: %s", exc)
         return _twiml("Sorry, we couldn't process that voice message. Please try again or call the emergency line.")
 
+    if row.get("rejected"):
+        # Never reaches _register_alert_row/sos_alerts - doesn't create an
+        # active SOS, doesn't put a pin on the map. Logged to its own small
+        # table only so the Command Center can flash a brief "false alarm
+        # rejected" notification, and told to the sender directly too, so a
+        # real emergency mistakenly classified as unrelated is at least
+        # visible somewhere, not dropped with zero trace.
+        database.insert_rejected_voice_message(phone=From, reason=row["reason"], raw_message=row.get("raw_message"))
+        logger.info("WhatsApp voice message rejected as non-emergency from %s: %s", From, row["reason"])
+        return _twiml(
+            f"We couldn't identify this as an emergency ({row['reason']}). "
+            "If you need help, please describe what's happening and your location."
+        )
+
+    _register_alert_row(row)
     return _twiml(f"SOS received via voice message. {row['summary']}")
 
 
-@app.post("/api/voice-sos/upload", response_model=Alert, dependencies=[Depends(verify_api_key)])
+@app.post("/api/voice-sos/upload", dependencies=[Depends(verify_api_key)])
 async def voice_sos_upload(file: UploadFile = File(...), lat: Optional[float] = None, lon: Optional[float] = None):
     """Local test path for the voice SOS pipeline - upload an audio file
-    directly instead of going through Twilio."""
+    directly instead of going through Twilio. No response_model (unlike the
+    other Alert-returning endpoints) since a rejected non-emergency message
+    returns a differently-shaped {"rejected": ...} dict instead of an Alert."""
     audio_bytes = await file.read()
     row = await process_voice_sos(audio_bytes, phone="TEST-UPLOAD", lat=lat, lon=lon, filename=file.filename or "sos.ogg")
+    if row.get("rejected"):
+        return row
     return _register_alert_row(row)
 
 

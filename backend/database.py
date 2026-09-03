@@ -110,6 +110,22 @@ def init_db() -> None:
         for col in ("dispatched_at", "resolved_at", "outcome_type", "outcome_note"):
             if col not in existing_sos_cols:
                 conn.execute(f"ALTER TABLE sos_alerts ADD COLUMN {col} TEXT")
+        # Non-emergency WhatsApp voice messages the AI triage step rejects -
+        # never becomes an sos_alerts row (so it can't show up as an active
+        # SOS/on the map), kept here only so the Command Center can surface a
+        # brief "false alarm rejected" notification instead of it vanishing
+        # with zero trace anywhere in the system.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS rejected_voice_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone TEXT,
+                reason TEXT,
+                raw_message TEXT,
+                received_at TEXT NOT NULL
+            )
+            """
+        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS drivers (
@@ -242,6 +258,26 @@ def insert_sos_alert(
             "reported_by": reported_by, "received_at": received_at,
             "urgency": urgency, "action_needed": action_needed, "summary": summary,
         }
+
+
+def insert_rejected_voice_message(phone: Optional[str], reason: str, raw_message: Optional[str]) -> dict:
+    received_at = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO rejected_voice_messages (phone, reason, raw_message, received_at) VALUES (?, ?, ?, ?)",
+            (phone, reason, raw_message, received_at),
+        )
+        return {"id": cur.lastrowid, "phone": phone, "reason": reason, "raw_message": raw_message, "received_at": received_at}
+
+
+def get_recent_rejected_voice_messages(limit: int = 20) -> List[dict]:
+    """Most recent first - the Command Center only needs enough to flash a
+    notification for whichever one(s) just arrived since its last poll."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM rejected_voice_messages ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(row) for row in rows]
 
 
 def get_active_hazards() -> List[dict]:
