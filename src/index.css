@@ -1,34 +1,59 @@
 @import "tailwindcss";
 
+/* Tailwind v4 defaults dark: to prefers-color-scheme - this makes it
+   respond to a .dark class instead, so the in-app toggle (not just OS
+   setting) controls it. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 html, body, #root {
   height: 100%;
   margin: 0;
 }
 
-/* Leaflet map (Dashboard command-center map) dark-theme overrides */
+/* Leaflet map (Dashboard command-center map) - light theme is the default,
+   .dark overrides restore the original dark styling. */
 .leaflet-container {
-  background: #0b1424;
+  background: #e2e8f0;
   font-family: inherit;
+}
+.dark .leaflet-container {
+  background: #0b1424;
 }
 .leaflet-div-icon {
   background: transparent;
   border: none;
 }
 .leaflet-tooltip {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #cbd5e1;
+  color: #1e293b;
+  font-size: 11px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.25);
+}
+.dark .leaflet-tooltip {
   background: rgba(15, 23, 42, 0.95);
   border: 1px solid #334155;
   color: #e2e8f0;
-  font-size: 11px;
   box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
 }
 .leaflet-tooltip-top:before {
+  border-top-color: #cbd5e1;
+}
+.dark .leaflet-tooltip-top:before {
   border-top-color: #334155;
 }
 .leaflet-control-attribution {
-  background: rgba(15, 23, 42, 0.75) !important;
-  color: #94a3b8 !important;
+  background: rgba(255, 255, 255, 0.8) !important;
+  color: #475569 !important;
   font-size: 9px !important;
 }
+.dark .leaflet-control-attribution {
+  background: rgba(15, 23, 42, 0.75) !important;
+  color: #94a3b8 !important;
+}
 .leaflet-control-attribution a {
+  color: #0369a1 !important;
+}
+.dark .leaflet-control-attribution a {
   color: #7dd3fc !important;
 }

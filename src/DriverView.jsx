@@ -55,9 +55,9 @@ const INCIDENT_TYPES = [
 ];
 
 const SEVERITY_LEVELS = [
-  { key: 'Critical', sub: 'Blocked', icon: AlertTriangle, cls: 'border-red-500/50 bg-red-500/15 text-red-300' },
-  { key: 'Moderate', sub: 'Delay', icon: Clock, cls: 'border-amber-500/50 bg-amber-500/15 text-amber-300' },
-  { key: 'Informational', sub: '', icon: Info, cls: 'border-sky-500/50 bg-sky-500/15 text-sky-300' },
+  { key: 'Critical', sub: 'Blocked', icon: AlertTriangle, cls: 'border-red-500/50 bg-red-500/15 text-red-600 dark:text-red-300' },
+  { key: 'Moderate', sub: 'Delay', icon: Clock, cls: 'border-amber-500/50 bg-amber-500/15 text-amber-600 dark:text-amber-300' },
+  { key: 'Informational', sub: '', icon: Info, cls: 'border-sky-500/50 bg-sky-500/15 text-sky-600 dark:text-sky-300' },
 ];
 
 function toSmsCode(str) {
@@ -75,9 +75,9 @@ function haversineKm(lat1, lng1, lat2, lng2) {
 }
 
 const BANNER_TONE = {
-  red: { border: 'border-red-500/40 bg-red-500/10', text: 'text-red-200', icon: 'text-red-400' },
-  amber: { border: 'border-amber-500/40 bg-amber-500/10', text: 'text-amber-200', icon: 'text-amber-400' },
-  emerald: { border: 'border-emerald-500/40 bg-emerald-500/10', text: 'text-emerald-200', icon: 'text-emerald-400' },
+  red: { border: 'border-red-500/40 bg-red-500/10', text: 'text-red-700 dark:text-red-200', icon: 'text-red-600 dark:text-red-400' },
+  amber: { border: 'border-amber-500/40 bg-amber-500/10', text: 'text-amber-700 dark:text-amber-200', icon: 'text-amber-600 dark:text-amber-400' },
+  emerald: { border: 'border-emerald-500/40 bg-emerald-500/10', text: 'text-emerald-700 dark:text-emerald-200', icon: 'text-emerald-600 dark:text-emerald-400' },
 };
 
 // Single, honest top-line verdict combining the two signals the backend
@@ -247,7 +247,13 @@ async function dispatchSos(lat, lng, details = {}) {
       latitude: lat,
       longitude: lng,
       timestamp: new Date().toISOString(),
-      priority: 'Emergency Medical Supplies',
+      // Was a hardcoded "Emergency Medical Supplies" regardless of what was
+      // actually being reported - a real SOS isn't always about medical
+      // cargo. Reflects the actual reported incident instead (the place
+      // name itself is resolved and shown on the Command Center side via
+      // reverse-geocoding, not baked into this string, to keep it out of
+      // the SOS submission's critical path).
+      priority: `${severity}: ${incidentType}`,
       status: 'DISPATCH_TRIGGERED',
       incident_type: incidentType,
       severity,
@@ -297,9 +303,9 @@ function computeCachedRoute(src, dest) {
 }
 
 const AI_RISK_TONE = {
-  SAFE: { card: 'border-emerald-500/40 bg-emerald-500/10', text: 'text-emerald-200', badge: 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300', tag: 'Safe' },
-  MODERATE: { card: 'border-amber-500/40 bg-amber-500/10', text: 'text-amber-200', badge: 'border-amber-500/50 bg-amber-500/15 text-amber-300', tag: 'Moderate' },
-  HIGH: { card: 'border-red-500/40 bg-red-500/10', text: 'text-red-200', badge: 'border-red-500/50 bg-red-500/15 text-red-300', tag: 'High Hazard Alert' },
+  SAFE: { card: 'border-emerald-500/40 bg-emerald-500/10', text: 'text-emerald-700 dark:text-emerald-200', badge: 'border-emerald-500/50 bg-emerald-500/15 text-emerald-600 dark:text-emerald-300', tag: 'Safe' },
+  MODERATE: { card: 'border-amber-500/40 bg-amber-500/10', text: 'text-amber-700 dark:text-amber-200', badge: 'border-amber-500/50 bg-amber-500/15 text-amber-600 dark:text-amber-300', tag: 'Moderate' },
+  HIGH: { card: 'border-red-500/40 bg-red-500/10', text: 'text-red-700 dark:text-red-200', badge: 'border-red-500/50 bg-red-500/15 text-red-600 dark:text-red-300', tag: 'High Hazard Alert' },
 };
 
 // The unified engine's HIGH level is hazard-specific (HIGH_LANDSLIDE_RISK,
@@ -320,8 +326,8 @@ function HazardBreakdownRow({ hazardKey, data }) {
   const tone = riskTone(data.ai_risk_level);
   if (!tone) return null;
   return (
-    <div className="flex items-center justify-between gap-2 border-t border-slate-800/80 py-1.5 first:border-t-0">
-      <span className="text-[11px] text-slate-300">{HAZARD_LABELS[hazardKey]}</span>
+    <div className="flex items-center justify-between gap-2 border-t border-slate-200/80 dark:border-slate-800/80 py-1.5 first:border-t-0">
+      <span className="text-[11px] text-slate-600 dark:text-slate-300">{HAZARD_LABELS[hazardKey]}</span>
       <div className="flex items-center gap-1.5">
         <span className={cx('text-[11px] font-semibold', tone.text)}>{Math.round(data.ai_safety_score)}%</span>
         <span className={cx('rounded-full border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide', tone.badge)}>
@@ -337,7 +343,7 @@ function AiCorridorRiskCard({ safetyScore, riskLevel, riskFactors, hazardBreakdo
   const tone = riskTone(riskLevel);
   if (!tone) {
     return (
-      <div className="rounded-lg border border-slate-700 bg-slate-800/40 p-2.5 text-[11px] text-slate-500">
+      <div className="rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800/40 p-2.5 text-[11px] text-slate-500 dark:text-slate-500">
         AI Corridor Risk Assessment unavailable (offline mode)
       </div>
     );
@@ -353,10 +359,10 @@ function AiCorridorRiskCard({ safetyScore, riskLevel, riskFactors, hazardBreakdo
         </span>
       </div>
       <div className={cx('text-lg font-bold leading-none', tone.text)}>
-        {Math.round(safetyScore)}%<span className="ml-1.5 text-[11px] font-normal text-slate-400">Safety Score</span>
+        {Math.round(safetyScore)}%<span className="ml-1.5 text-[11px] font-normal text-slate-500 dark:text-slate-400">Safety Score</span>
       </div>
       {riskFactors?.length > 0 && (
-        <div className="mt-1 text-[11px] text-slate-400">Key driver: {riskFactors.join(' + ')}</div>
+        <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Key driver: {riskFactors.join(' + ')}</div>
       )}
       {hazardBreakdown && (
         <>
@@ -368,7 +374,7 @@ function AiCorridorRiskCard({ safetyScore, riskLevel, riskFactors, hazardBreakdo
             {expanded ? 'Hide' : 'View'} 4-Hazard Breakdown
           </button>
           {expanded && (
-            <div className="mt-1.5 rounded-md border border-slate-800/80 bg-slate-950/40 px-2">
+            <div className="mt-1.5 rounded-md border border-slate-200/80 dark:border-slate-800/80 bg-white/50 dark:bg-slate-950/40 px-2">
               {HAZARD_ORDER.map((key) => (
                 <HazardBreakdownRow key={key} hazardKey={key} data={hazardBreakdown[key]} />
               ))}
@@ -409,10 +415,10 @@ function ElevationSparkline({ elevations, maxGradientPct, steepestSegmentIndex }
   const steepMidY = hasSteepMarker ? Math.min(points[steepestSegmentIndex][1], points[steepestSegmentIndex + 1][1]) : null;
 
   return (
-    <div className="rounded-lg border border-slate-700/60 bg-slate-900/40 p-2.5">
-      <div className="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-wide text-slate-400">
+    <div className="rounded-lg border border-slate-300/60 dark:border-slate-700/60 bg-white dark:bg-slate-900/40 p-2.5">
+      <div className="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
         <span className="flex items-center gap-1"><Mountain size={11} /> Elevation Profile</span>
-        <span className="flex items-center gap-1 font-semibold text-amber-300">
+        <span className="flex items-center gap-1 font-semibold text-amber-600 dark:text-amber-300">
           {hasSteepMarker && <AlertTriangle size={10} />} Max Gradient: {maxGradientPct.toFixed(1)}%
         </span>
       </div>
@@ -428,9 +434,9 @@ function ElevationSparkline({ elevations, maxGradientPct, steepestSegmentIndex }
         {steepSegment && <path d={steepSegment} fill="none" stroke="#f59e0b" strokeWidth={3} strokeLinecap="round" />}
         {hasSteepMarker && <circle cx={steepMidX} cy={steepMidY} r={2.5} fill="#f59e0b" />}
       </svg>
-      <div className="mt-1 flex justify-between text-[9px] text-slate-500">
+      <div className="mt-1 flex justify-between text-[9px] text-slate-500 dark:text-slate-500">
         <span>{Math.round(min)}m</span>
-        {hasSteepMarker && <span className="text-amber-400">⚠ Steepest stretch marked</span>}
+        {hasSteepMarker && <span className="text-amber-600 dark:text-amber-400">⚠ Steepest stretch marked</span>}
         <span>{Math.round(max)}m</span>
       </div>
     </div>
@@ -440,12 +446,12 @@ function ElevationSparkline({ elevations, maxGradientPct, steepestSegmentIndex }
 function Modal({ onClose, children }) {
   return (
     <div
-      className="absolute inset-0 z-50 flex items-end justify-center bg-slate-950/80 p-4 backdrop-blur-sm sm:items-center"
+      className="absolute inset-0 z-50 flex items-end justify-center bg-white/85 dark:bg-slate-950/80 p-4 backdrop-blur-sm sm:items-center"
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-[340px] rounded-2xl border border-slate-700 bg-slate-900 p-4 shadow-2xl"
+        className="w-full max-w-[340px] rounded-2xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 shadow-2xl"
       >
         {children}
       </div>
@@ -510,18 +516,18 @@ function DriverLoginGate({ onLoggedIn, notice }) {
   };
 
   return (
-    <div className="flex min-h-screen w-full items-center justify-center bg-slate-950 p-4">
-      <div className="w-full max-w-[400px] rounded-[2rem] border border-slate-800 bg-slate-950 p-6 shadow-2xl">
+    <div className="flex min-h-screen w-full items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
+      <div className="w-full max-w-[400px] rounded-[2rem] border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-6 shadow-2xl">
         <div className="mb-6 flex flex-col items-center gap-2 text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-sky-500/15 text-sky-400">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-sky-500/15 text-sky-600 dark:text-sky-400">
             <Phone size={22} />
           </div>
-          <h1 className="text-sm font-bold text-slate-100">Driver Login</h1>
-          <p className="text-[12px] text-slate-500">Verify your phone once — stays signed in until you sign out.</p>
+          <h1 className="text-sm font-bold text-slate-900 dark:text-slate-100">Driver Login</h1>
+          <p className="text-[12px] text-slate-500 dark:text-slate-500">Verify your phone once — stays signed in until you sign out.</p>
         </div>
 
         {notice && (
-          <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] text-amber-300">
+          <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] text-amber-600 dark:text-amber-300">
             <AlertTriangle size={14} className="mt-0.5 shrink-0" />
             <span>{notice}</span>
           </div>
@@ -529,19 +535,19 @@ function DriverLoginGate({ onLoggedIn, notice }) {
 
         {step === 'phone' ? (
           <div className="space-y-3">
-            <label className="block text-[11px] font-medium text-slate-400">Phone Number</label>
+            <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400">Phone Number</label>
             <div className="flex items-center gap-2">
-              <span className="rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2.5 text-[13px] text-slate-400">+91</span>
+              <span className="rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/70 px-3 py-2.5 text-[13px] text-slate-500 dark:text-slate-400">+91</span>
               <input
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="98XXXXXXXX"
                 inputMode="numeric"
                 maxLength={10}
-                className="w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2.5 text-[13px] text-slate-200 placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
+                className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-950/70 px-3 py-2.5 text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-600 dark:placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
               />
             </div>
-            {error && <p className="text-[11px] text-red-400">{error}</p>}
+            {error && <p className="text-[11px] text-red-600 dark:text-red-400">{error}</p>}
             <button
               onClick={sendCode}
               disabled={submitting}
@@ -553,15 +559,15 @@ function DriverLoginGate({ onLoggedIn, notice }) {
           </div>
         ) : (
           <div className="space-y-3">
-            <label className="block text-[11px] font-medium text-slate-400">Code sent to +91 {digits}</label>
+            <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400">Code sent to +91 {digits}</label>
             <input
               value={code}
               onChange={(e) => setCode(e.target.value)}
               placeholder="6-digit code"
               inputMode="numeric"
-              className="w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2.5 text-center text-[15px] tracking-[0.3em] text-slate-200 placeholder:text-slate-600 placeholder:tracking-normal focus:border-sky-600 focus:outline-none"
+              className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-950/70 px-3 py-2.5 text-center text-[15px] tracking-[0.3em] text-slate-800 dark:text-slate-200 placeholder:text-slate-600 dark:placeholder:text-slate-600 placeholder:tracking-normal focus:border-sky-600 focus:outline-none"
             />
-            {error && <p className="text-[11px] text-red-400">{error}</p>}
+            {error && <p className="text-[11px] text-red-600 dark:text-red-400">{error}</p>}
             <button
               onClick={verifyCode}
               disabled={submitting}
@@ -570,7 +576,7 @@ function DriverLoginGate({ onLoggedIn, notice }) {
               {submitting ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={14} />}
               {submitting ? 'Verifying…' : 'Verify'}
             </button>
-            <button onClick={() => { setStep('phone'); setCode(''); setError(null); }} className="w-full text-center text-[11px] text-slate-500 hover:text-slate-300">
+            <button onClick={() => { setStep('phone'); setCode(''); setError(null); }} className="w-full text-center text-[11px] text-slate-500 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300">
               Use a different number
             </button>
           </div>
@@ -586,9 +592,9 @@ function LocationField({ label, value, onChange, onSubmit, onChip, activeName, s
 
   return (
     <div className="relative">
-      <label className="mb-1 block text-[10px] uppercase tracking-wide text-slate-500">{label}</label>
-      <div className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-950/70 px-2.5 py-1.5">
-        <MapPin size={13} className="shrink-0 text-slate-500" />
+      <label className="mb-1 block text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-500">{label}</label>
+      <div className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-950/70 px-2.5 py-1.5">
+        <MapPin size={13} className="shrink-0 text-slate-500 dark:text-slate-500" />
         <input
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -598,11 +604,11 @@ function LocationField({ label, value, onChange, onSubmit, onChip, activeName, s
             if (e.key === 'Enter') onSubmit();
           }}
           placeholder="Search any place in India…"
-          className="w-full bg-transparent text-[13px] text-slate-200 placeholder:text-slate-600 focus:outline-none"
+          className="w-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-600 dark:placeholder:text-slate-600 focus:outline-none"
         />
       </div>
       {showSuggestions && (
-        <div className="absolute inset-x-0 top-full z-20 mt-1 max-h-48 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 shadow-xl">
+        <div className="absolute inset-x-0 top-full z-20 mt-1 max-h-48 overflow-y-auto rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl">
           {suggestions.map((s, i) => (
             <button
               key={`${s.lat},${s.lon}-${i}`}
@@ -615,7 +621,7 @@ function LocationField({ label, value, onChange, onSubmit, onChip, activeName, s
                 e.preventDefault();
                 onSelectSuggestion(s);
               }}
-              className="block w-full truncate px-2.5 py-1.5 text-left text-[12px] text-slate-300 hover:bg-slate-800"
+              className="block w-full truncate px-2.5 py-1.5 text-left text-[12px] text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
             >
               {s.name}
             </button>
@@ -630,8 +636,8 @@ function LocationField({ label, value, onChange, onSubmit, onChip, activeName, s
             className={cx(
               'rounded-full border px-2 py-0.5 text-[10px] font-medium transition',
               activeName === hub.name
-                ? 'border-sky-500/50 bg-sky-500/15 text-sky-300'
-                : 'border-slate-700 text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                ? 'border-sky-500/50 bg-sky-500/15 text-sky-600 dark:text-sky-300'
+                : 'border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600 hover:text-slate-800 dark:hover:text-slate-200'
             )}
           >
             {hub.name}
@@ -669,7 +675,7 @@ function RoutePreviewMap({ coordinates, hazards, hazardDetected }) {
     .join(' ');
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="h-[100px] w-full rounded-lg border border-slate-800 bg-slate-950/70">
+    <svg viewBox={`0 0 ${W} ${H}`} className="h-[100px] w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-950/70">
       <polyline
         points={points}
         fill="none"
@@ -1007,7 +1013,7 @@ export default function DriverView({ onTriggerSOS }) {
         category,
         severity,
         note,
-        cargo: 'Critical: Emergency Medical Supplies',
+        cargo: `${severity}: ${category}`,
         vehicle: 'Ambulance',
         lat,
         lng,
@@ -1045,7 +1051,7 @@ export default function DriverView({ onTriggerSOS }) {
         category,
         severity,
         note,
-        cargo: 'Critical: Emergency Medical Supplies',
+        cargo: `${severity}: ${category}`,
         vehicle: 'Ambulance',
         lat,
         lng,
@@ -1186,21 +1192,21 @@ export default function DriverView({ onTriggerSOS }) {
   }
 
   return (
-    <div className="flex min-h-screen w-full items-center justify-center bg-slate-950 p-4">
-      <div className="relative flex h-[800px] w-full max-w-[400px] flex-col overflow-y-auto overflow-x-hidden rounded-[2rem] border border-slate-800 bg-slate-950 shadow-2xl">
+    <div className="flex min-h-screen w-full items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
+      <div className="relative flex h-[800px] w-full max-w-[400px] flex-col overflow-y-auto overflow-x-hidden rounded-[2rem] border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 shadow-2xl">
         {toast && (
-          <div className="pointer-events-none absolute left-1/2 top-4 z-[60] w-[calc(100%-2rem)] max-w-[320px] -translate-x-1/2 rounded-lg border border-emerald-500/40 bg-slate-900/95 px-3 py-2.5 text-center text-xs font-semibold text-emerald-300 shadow-xl backdrop-blur">
+          <div className="pointer-events-none absolute left-1/2 top-4 z-[60] w-[calc(100%-2rem)] max-w-[320px] -translate-x-1/2 rounded-lg border border-emerald-500/40 bg-white dark:bg-slate-900/95 px-3 py-2.5 text-center text-xs font-semibold text-emerald-600 dark:text-emerald-300 shadow-xl backdrop-blur">
             <CheckCircle2 size={14} className="-mt-0.5 mr-1 inline" />
             {toast}
           </div>
         )}
         {/* Header */}
-        <header className="shrink-0 space-y-2.5 border-b border-slate-800 bg-slate-900/60 px-4 py-3">
+        <header className="shrink-0 space-y-2.5 border-b border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-900/60 px-4 py-3">
           <div className="flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-1.5 text-slate-100">
-              <Truck size={16} className="shrink-0 text-sky-400" />
+            <div className="flex min-w-0 items-center gap-1.5 text-slate-900 dark:text-slate-100">
+              <Truck size={16} className="shrink-0 text-sky-600 dark:text-sky-400" />
               <span className="truncate text-sm font-bold tracking-wide">{driverSession.phone}</span>
-              <button onClick={signOut} title="Sign out" className="ml-1 shrink-0 text-slate-500 transition hover:text-red-400">
+              <button onClick={signOut} title="Sign out" className="ml-1 shrink-0 text-slate-500 dark:text-slate-500 transition hover:text-red-600 dark:hover:text-red-400">
                 <LogOut size={14} />
               </button>
             </div>
@@ -1209,8 +1215,8 @@ export default function DriverView({ onTriggerSOS }) {
               className={cx(
                 'flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition',
                 online
-                  ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-400'
-                  : 'border-red-500/40 bg-red-500/15 text-red-400'
+                  ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                  : 'border-red-500/40 bg-red-500/15 text-red-600 dark:text-red-400'
               )}
             >
               {online ? <Wifi size={12} /> : <WifiOff size={12} />}
@@ -1218,13 +1224,8 @@ export default function DriverView({ onTriggerSOS }) {
             </button>
           </div>
 
-          <div className="inline-flex items-center gap-1.5 rounded-md border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-[11px] font-semibold text-red-300">
-            <ShieldAlert size={12} />
-            Priority 1: Emergency Medical Supplies
-          </div>
-
           {pendingCount > 0 && (
-            <div className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] font-semibold text-amber-300">
+            <div className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] font-semibold text-amber-600 dark:text-amber-300">
               <Clock size={12} />
               {pendingCount} report{pendingCount === 1 ? '' : 's'} queued — sending when signal returns
             </div>
@@ -1232,7 +1233,7 @@ export default function DriverView({ onTriggerSOS }) {
         </header>
 
         {/* Navigation card */}
-        <section className="mx-4 mt-4 shrink-0 space-y-3 rounded-xl border border-slate-800 bg-slate-900/60 p-3.5">
+        <section className="mx-4 mt-4 shrink-0 space-y-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-900/60 p-3.5">
           <LocationField
             label="Origin"
             value={sourceInput}
@@ -1244,7 +1245,7 @@ export default function DriverView({ onTriggerSOS }) {
             onSelectSuggestion={selectSourcePlace}
           />
           <div className="flex justify-center">
-            <ArrowRight size={14} className="rotate-90 text-slate-600" />
+            <ArrowRight size={14} className="rotate-90 text-slate-600 dark:text-slate-600" />
           </div>
           <LocationField
             label="Destination"
@@ -1260,14 +1261,14 @@ export default function DriverView({ onTriggerSOS }) {
           <button
             onClick={handlePlanRoute}
             disabled={routeLoading}
-            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-sky-600/40 bg-sky-600/15 py-2 text-xs font-semibold text-sky-300 transition hover:bg-sky-600/25 disabled:opacity-60"
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-sky-600/40 bg-sky-600/15 py-2 text-xs font-semibold text-sky-600 dark:text-sky-300 transition hover:bg-sky-600/25 disabled:opacity-60"
           >
             {routeLoading ? <Loader2 size={13} className="animate-spin" /> : <Navigation size={13} />}
             {routeLoading ? 'Calculating Route…' : 'Plan Route'}
           </button>
 
           {routeError && (
-            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-[11px] text-amber-300">
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-[11px] text-amber-600 dark:text-amber-300">
               {routeError}
             </div>
           )}
@@ -1322,7 +1323,7 @@ export default function DriverView({ onTriggerSOS }) {
                 />
               )}
 
-              <div className="text-right text-[10px] uppercase tracking-wide text-slate-500">
+              <div className="text-right text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-500">
                 {routeResult.source === 'live' ? 'Live TomTom traffic routing' : 'Offline cached estimate'}
               </div>
             </>
@@ -1373,18 +1374,18 @@ export default function DriverView({ onTriggerSOS }) {
               </span>
             </button>
           </div>
-          <p className="text-[11px] text-slate-500">
+          <p className="text-[11px] text-slate-500 dark:text-slate-500">
             Tap to report an incident · Hold {(HOLD_MS / 1000).toFixed(1)}s for instant SOS
           </p>
         </section>
 
         {/* Ground reporting */}
-        <div className="shrink-0 border-t border-slate-800 bg-slate-900/60 p-4">
+        <div className="shrink-0 border-t border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-900/60 p-4">
           <button
             onClick={() => setActiveModal('obstacle')}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-800/70 py-3 text-sm font-medium text-slate-200 transition hover:bg-slate-800 active:scale-[0.98]"
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-800/70 py-3 text-sm font-medium text-slate-800 dark:text-slate-200 transition hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-[0.98]"
           >
-            <AlertTriangle size={16} className="text-amber-400" />
+            <AlertTriangle size={16} className="text-amber-600 dark:text-amber-400" />
             Report Road Obstacle
           </button>
         </div>
@@ -1397,11 +1398,11 @@ export default function DriverView({ onTriggerSOS }) {
           <Modal onClose={() => {}}>
             <div className="space-y-3 text-center">
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-sky-500/15">
-                <Loader2 size={26} className="animate-spin text-sky-400" />
+                <Loader2 size={26} className="animate-spin text-sky-600 dark:text-sky-400" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-slate-100">Sending SOS…</h3>
-                <p className="mt-1 text-xs text-slate-400">Transmitting your location to the emergency network. This can take a few seconds.</p>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">Sending SOS…</h3>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Transmitting your location to the emergency network. This can take a few seconds.</p>
               </div>
             </div>
           </Modal>
@@ -1412,17 +1413,17 @@ export default function DriverView({ onTriggerSOS }) {
           <Modal onClose={closeModal}>
             <div className="space-y-3 text-center">
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/15">
-                <CheckCircle2 size={26} className="text-emerald-400" />
+                <CheckCircle2 size={26} className="text-emerald-600 dark:text-emerald-400" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-slate-100">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
                   {lastDispatch?.category === INSTANT_SOS_CATEGORY ? 'Instant SOS Dispatched' : 'Incident Report Dispatched'}
                 </h3>
-                <p className="mt-1 text-xs text-slate-400">Dispatch and the nearest response unit have been notified in real time.</p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Dispatch and the nearest response unit have been notified in real time.</p>
               </div>
               {lastDispatch && (
                 <div className="flex flex-wrap justify-center gap-1.5">
-                  <span className="rounded-full border border-slate-700 bg-slate-800/70 px-2 py-0.5 text-[10px] font-medium text-slate-300">
+                  <span className="rounded-full border border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-800/70 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:text-slate-300">
                     {lastDispatch.category}
                   </span>
                   <span
@@ -1436,9 +1437,9 @@ export default function DriverView({ onTriggerSOS }) {
                 </div>
               )}
               {lastDispatch?.note && (
-                <p className="text-left text-[11px] italic text-slate-400">"{lastDispatch.note}"</p>
+                <p className="text-left text-[11px] italic text-slate-500 dark:text-slate-400">"{lastDispatch.note}"</p>
               )}
-              <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-2.5 text-left font-mono text-[11px] text-slate-300">
+              <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-950/60 p-2.5 text-left font-mono text-[11px] text-slate-600 dark:text-slate-300">
                 Lat: {(lastDispatch?.lat ?? SOS_LAT).toFixed(4)}, Lng: {(lastDispatch?.lng ?? SOS_LNG).toFixed(4)}
               </div>
               <button
@@ -1461,16 +1462,16 @@ export default function DriverView({ onTriggerSOS }) {
           <Modal onClose={closeModal}>
             <div className="space-y-3 text-center">
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-500/15">
-                <AlertTriangle size={26} className="text-amber-400" />
+                <AlertTriangle size={26} className="text-amber-600 dark:text-amber-400" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-slate-100">Couldn't Confirm Delivery</h3>
-                <p className="mt-1 text-xs text-slate-400">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">Couldn't Confirm Delivery</h3>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                   Your report is queued and will send automatically the moment a connection succeeds — it has not been lost.
                 </p>
               </div>
               {pendingCount > 0 && (
-                <p className="text-[11px] text-amber-300">{pendingCount} report{pendingCount > 1 ? 's' : ''} pending delivery</p>
+                <p className="text-[11px] text-amber-600 dark:text-amber-300">{pendingCount} report{pendingCount > 1 ? 's' : ''} pending delivery</p>
               )}
               <button
                 onClick={closeModal}
@@ -1488,16 +1489,16 @@ export default function DriverView({ onTriggerSOS }) {
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500/15">
-                  <WifiOff size={20} className="text-amber-400" />
+                  <WifiOff size={20} className="text-amber-600 dark:text-amber-400" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-slate-100">No Cellular Data Detected</h3>
-                  <p className="text-[11px] text-slate-400">Falling back to compressed SMS relay</p>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">No Cellular Data Detected</h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">Falling back to compressed SMS relay</p>
                 </div>
               </div>
-              <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-2.5">
-                <div className="mb-1 text-[10px] uppercase tracking-wide text-slate-500">SMS Payload</div>
-                <code className="block break-all font-mono text-[12px] text-amber-300">
+              <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-950/70 p-2.5">
+                <div className="mb-1 text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-500">SMS Payload</div>
+                <code className="block break-all font-mono text-[12px] text-amber-600 dark:text-amber-300">
                   SOS|{(lastDispatch?.lat ?? SOS_LAT).toFixed(4)},{(lastDispatch?.lng ?? SOS_LNG).toFixed(4)}|
                   {toSmsCode(lastDispatch?.severity)}|{toSmsCode(lastDispatch?.category)}
                 </code>
@@ -1510,13 +1511,13 @@ export default function DriverView({ onTriggerSOS }) {
                   <Send size={15} /> Send SMS Fallback via Native Carrier
                 </button>
               ) : (
-                <div className="flex items-center justify-center gap-2 rounded-lg bg-emerald-500/15 py-2.5 text-sm font-semibold text-emerald-400">
+                <div className="flex items-center justify-center gap-2 rounded-lg bg-emerald-500/15 py-2.5 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
                   <CheckCircle2 size={16} /> Dispatched via SMS Gateway
                 </div>
               )}
               <button
                 onClick={closeModal}
-                className="w-full rounded-lg border border-slate-700 py-2 text-xs font-medium text-slate-400 transition hover:text-slate-200"
+                className="w-full rounded-lg border border-slate-300 dark:border-slate-700 py-2 text-xs font-medium text-slate-500 dark:text-slate-400 transition hover:text-slate-800 dark:hover:text-slate-200"
               >
                 Close
               </button>
@@ -1529,14 +1530,14 @@ export default function DriverView({ onTriggerSOS }) {
           <Modal onClose={closeModal}>
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-slate-100">Report Route Incident</h3>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">Report Route Incident</h3>
                 <button onClick={closeModal}>
-                  <X size={16} className="text-slate-500 hover:text-slate-300" />
+                  <X size={16} className="text-slate-500 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300" />
                 </button>
               </div>
 
               <div>
-                <label className="mb-1.5 block text-[11px] font-medium text-slate-400">Incident Type</label>
+                <label className="mb-1.5 block text-[11px] font-medium text-slate-500 dark:text-slate-400">Incident Type</label>
                 <div className="grid grid-cols-2 gap-1.5">
                   {INCIDENT_TYPES.map(({ key, icon: Icon }) => (
                     <button
@@ -1545,8 +1546,8 @@ export default function DriverView({ onTriggerSOS }) {
                       className={cx(
                         'flex items-center gap-1.5 rounded-lg border px-2 py-2 text-left text-[11px] font-medium leading-tight transition',
                         incidentType === key
-                          ? 'border-sky-500/60 bg-sky-500/15 text-sky-300'
-                          : 'border-slate-700 bg-slate-950/50 text-slate-300 hover:border-slate-600'
+                          ? 'border-sky-500/60 bg-sky-500/15 text-sky-600 dark:text-sky-300'
+                          : 'border-slate-300 dark:border-slate-700 bg-white/60 dark:bg-slate-950/50 text-slate-600 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600'
                       )}
                     >
                       <Icon size={14} className="shrink-0" />
@@ -1557,7 +1558,7 @@ export default function DriverView({ onTriggerSOS }) {
               </div>
 
               <div>
-                <label className="mb-1.5 block text-[11px] font-medium text-slate-400">Severity Level</label>
+                <label className="mb-1.5 block text-[11px] font-medium text-slate-500 dark:text-slate-400">Severity Level</label>
                 <div className="grid grid-cols-3 gap-1.5">
                   {SEVERITY_LEVELS.map(({ key, sub, icon: Icon, cls }) => (
                     <button
@@ -1565,7 +1566,7 @@ export default function DriverView({ onTriggerSOS }) {
                       onClick={() => setIncidentSeverity(key)}
                       className={cx(
                         'flex flex-col items-center gap-0.5 rounded-lg border px-1.5 py-2 text-center transition',
-                        incidentSeverity === key ? cls : 'border-slate-700 bg-slate-950/50 text-slate-400 hover:border-slate-600'
+                        incidentSeverity === key ? cls : 'border-slate-300 dark:border-slate-700 bg-white/60 dark:bg-slate-950/50 text-slate-500 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600'
                       )}
                     >
                       <Icon size={14} />
@@ -1577,24 +1578,24 @@ export default function DriverView({ onTriggerSOS }) {
               </div>
 
               <div>
-                <label className="mb-1 block text-[11px] font-medium text-slate-400">Optional Notes</label>
+                <label className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">Optional Notes</label>
                 <input
                   value={incidentNote}
                   onChange={(e) => setIncidentNote(e.target.value)}
                   placeholder="e.g. Culvert washed out 5km ahead"
                   maxLength={140}
-                  className="w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-[12px] text-slate-200 placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-950/70 px-3 py-2 text-[12px] text-slate-800 dark:text-slate-200 placeholder:text-slate-600 dark:placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
                 />
               </div>
 
-              <p className="flex items-center gap-1.5 text-[10px] text-slate-500">
+              <p className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-500">
                 <MapPin size={11} /> Live GPS coordinates are attached automatically
               </p>
 
               <div className="flex gap-2 pt-1">
                 <button
                   onClick={closeModal}
-                  className="flex-1 rounded-lg border border-slate-700 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-slate-800"
+                  className="flex-1 rounded-lg border border-slate-300 dark:border-slate-700 py-2.5 text-sm font-medium text-slate-600 dark:text-slate-300 transition hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
                   Cancel
                 </button>
@@ -1615,45 +1616,45 @@ export default function DriverView({ onTriggerSOS }) {
           <Modal onClose={closeModal}>
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-slate-100">Report Road Obstacle</h3>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">Report Road Obstacle</h3>
                 <button onClick={closeModal}>
-                  <X size={16} className="text-slate-500 hover:text-slate-300" />
+                  <X size={16} className="text-slate-500 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300" />
                 </button>
               </div>
 
               {!reportSubmitted ? (
                 <>
                   <div>
-                    <label className="mb-1 block text-[11px] font-medium text-slate-400">Obstacle Type</label>
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">Obstacle Type</label>
                     <div className="relative">
                       <select
                         value={obstacleType}
                         onChange={(e) => setObstacleType(e.target.value)}
-                        className="w-full appearance-none rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2.5 text-sm text-slate-200 focus:border-sky-600 focus:outline-none"
+                        className="w-full appearance-none rounded-lg border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-950/70 px-3 py-2.5 text-sm text-slate-800 dark:text-slate-200 focus:border-sky-600 focus:outline-none"
                       >
                         <option>Landslide</option>
                         <option>Flood</option>
                         <option>Fallen Tree</option>
                       </select>
-                      <ChevronDown size={15} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                      <ChevronDown size={15} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-500" />
                     </div>
                   </div>
 
                   <div>
-                    <label className="mb-1 block text-[11px] font-medium text-slate-400">Description</label>
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">Description</label>
                     <textarea
                       value={obstacleDescription}
                       onChange={(e) => setObstacleDescription(e.target.value)}
                       placeholder="e.g. Boulder blocking single lane"
                       rows={2}
                       maxLength={200}
-                      className="w-full resize-none rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-[12px] text-slate-200 placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
+                      className="w-full resize-none rounded-lg border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-950/70 px-3 py-2 text-[12px] text-slate-800 dark:text-slate-200 placeholder:text-slate-600 dark:placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
                     />
                   </div>
 
                   <div>
-                    <label className="mb-1 block text-[11px] font-medium text-slate-400">Photo Evidence</label>
-                    <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-slate-700 bg-slate-950/50 py-4 text-center text-xs text-slate-400 transition hover:border-slate-600">
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">Photo Evidence</label>
+                    <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 bg-white/60 dark:bg-slate-950/50 py-4 text-center text-xs text-slate-500 dark:text-slate-400 transition hover:border-slate-300 dark:hover:border-slate-600">
                       <ImagePlus size={16} className="shrink-0" />
                       <span className="truncate">{photoName ? photoName : 'Tap to attach photo'}</span>
                       <input
@@ -1665,7 +1666,7 @@ export default function DriverView({ onTriggerSOS }) {
                     </label>
                   </div>
 
-                  <p className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                  <p className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-500">
                     <MapPin size={11} /> Live GPS coordinates are attached automatically
                   </p>
 
@@ -1680,11 +1681,11 @@ export default function DriverView({ onTriggerSOS }) {
                 </>
               ) : (
                 <div className="flex flex-col items-center gap-2 py-4 text-center">
-                  {reportQueued ? <Clock size={30} className="text-amber-400" /> : <CheckCircle2 size={30} className="text-emerald-400" />}
-                  <p className="text-sm font-semibold text-slate-100">
+                  {reportQueued ? <Clock size={30} className="text-amber-600 dark:text-amber-400" /> : <CheckCircle2 size={30} className="text-emerald-600 dark:text-emerald-400" />}
+                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                     {reportQueued ? 'Report queued' : reportOutcome && !reportOutcome.isNew ? 'Hazard confirmed' : 'Report submitted'}
                   </p>
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
                     {reportQueued
                       ? 'Could not reach the command center right now — will send automatically once signal returns.'
                       : reportOutcome && !reportOutcome.isNew
@@ -1703,10 +1704,10 @@ export default function DriverView({ onTriggerSOS }) {
         {zoneWarning && (
           <Modal onClose={() => setZoneWarning(null)}>
             <div className="space-y-3 text-center">
-              <AlertTriangle size={32} className="mx-auto text-red-400" />
-              <h3 className="text-sm font-bold text-red-300">Entering a High-Risk Zone</h3>
-              <p className="text-[12px] leading-snug text-slate-300">
-                Your current location has elevated <span className="font-semibold text-red-300">{HAZARD_LABELS[zoneWarning.hazard] || zoneWarning.hazard}</span> risk
+              <AlertTriangle size={32} className="mx-auto text-red-600 dark:text-red-400" />
+              <h3 className="text-sm font-bold text-red-600 dark:text-red-300">Entering a High-Risk Zone</h3>
+              <p className="text-[12px] leading-snug text-slate-600 dark:text-slate-300">
+                Your current location has elevated <span className="font-semibold text-red-600 dark:text-red-300">{HAZARD_LABELS[zoneWarning.hazard] || zoneWarning.hazard}</span> risk
                 right now (safety score {Math.round(zoneWarning.score)}%). Drive with caution.
               </p>
               <button
@@ -1727,10 +1728,10 @@ export default function DriverView({ onTriggerSOS }) {
         {risingWarning && (
           <Modal onClose={() => setRisingWarning(null)}>
             <div className="space-y-3 text-center">
-              <TrendingUp size={32} className="mx-auto text-amber-400" />
-              <h3 className="text-sm font-bold text-amber-300">Conditions Worsening Nearby</h3>
-              <p className="text-[12px] leading-snug text-slate-300">
-                <span className="font-semibold text-amber-300">{HAZARD_LABELS[risingWarning.hazard] || risingWarning.hazard}</span> risk
+              <TrendingUp size={32} className="mx-auto text-amber-600 dark:text-amber-400" />
+              <h3 className="text-sm font-bold text-amber-600 dark:text-amber-300">Conditions Worsening Nearby</h3>
+              <p className="text-[12px] leading-snug text-slate-600 dark:text-slate-300">
+                <span className="font-semibold text-amber-600 dark:text-amber-300">{HAZARD_LABELS[risingWarning.hazard] || risingWarning.hazard}</span> risk
                 near your location is forecast to rise over the next few hours (projected safety score {Math.round(risingWarning.projectedScore)}%). Not an emergency yet - stay alert.
               </p>
               <button

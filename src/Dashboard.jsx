@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { MapContainer, TileLayer, Marker, Polyline, Tooltip, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Polyline, Tooltip, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { apiFetch } from './apiClient';
@@ -21,15 +21,44 @@ import {
 const INDIA_CENTER = [22.5, 82.0];
 const INDIA_BOUNDS = [[5.0, 66.0], [38.0, 99.0]];
 const DEFAULT_ZOOM = 5;
-const TILE_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}';
-const TILE_ATTRIBUTION = 'Tiles &copy; Esri &mdash; Esri, HERE, Garmin, &copy; OpenStreetMap contributors, and the GIS community';
 
-function divIcon(node, size) {
+// Three switchable base layers, all free/no-API-key Esri tile services (same
+// provider/attribution family as the original single layer, just different
+// map styles) - picked over adding a second provider so there's only one
+// attribution line and one set of usage terms to think about.
+const MAP_TYPES = {
+  normal: {
+    label: 'Standard',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Tiles &copy; Esri &mdash; Esri, HERE, Garmin, &copy; OpenStreetMap contributors, and the GIS community',
+  },
+  satellite: {
+    label: 'Satellite',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Tiles &copy; Esri &mdash; Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+  },
+  physical: {
+    // Esri's World_Terrain_Base (tried first) loads fine but is a very
+    // pale, low-contrast style that reads as "mostly white" at a glance -
+    // OpenTopoMap actually shows visible green/brown relief shading and
+    // contour lines, closer to what "physical map" usually means. Different
+    // provider than the other two (still free, no API key), so its own
+    // {z}/{x}/{y} coordinate order and subdomain rotation, not Esri's.
+    label: 'Physical',
+    url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+    subdomains: 'abc',
+    attribution: 'Map data: &copy; OpenStreetMap contributors, SRTM | Map style: &copy; OpenTopoMap (CC-BY-SA)',
+    maxNativeZoom: 17,
+  },
+};
+
+function divIcon(node, size, popupAnchor) {
   return L.divIcon({
     html: renderToStaticMarkup(node),
     className: '',
     iconSize: size,
     iconAnchor: [size[0] / 2, size[1] / 2],
+    ...(popupAnchor ? { popupAnchor } : {}),
   });
 }
 
@@ -272,9 +301,9 @@ const ROUTES_SEED = [
 ];
 
 const RISK_CONFIG = {
-  safe: { label: 'Safe / Clear', stroke: '#22c55e', text: 'text-emerald-400', badge: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30', dot: 'bg-emerald-500' },
-  moderate: { label: 'Moderate Risk Watch', stroke: '#f59e0b', text: 'text-amber-400', badge: 'bg-amber-500/15 text-amber-400 border-amber-500/30', dot: 'bg-amber-500' },
-  blocked: { label: 'Blocked / High Risk', stroke: '#ef4444', text: 'text-red-400', badge: 'bg-red-500/15 text-red-400 border-red-500/30', dot: 'bg-red-500' },
+  safe: { label: 'Safe / Clear', stroke: '#22c55e', text: 'text-emerald-600 dark:text-emerald-400', badge: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30', dot: 'bg-emerald-500' },
+  moderate: { label: 'Moderate Risk Watch', stroke: '#f59e0b', text: 'text-amber-600 dark:text-amber-400', badge: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30', dot: 'bg-amber-500' },
+  blocked: { label: 'Blocked / High Risk', stroke: '#ef4444', text: 'text-red-600 dark:text-red-400', badge: 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30', dot: 'bg-red-500' },
 };
 
 // The unified engine reports risk-level strings per-hazard (HIGH_LANDSLIDE_RISK,
@@ -398,19 +427,19 @@ const CARGO_STYLE = {
 };
 const CONVOY_STATUS_DOT = { Moving: 'bg-emerald-400 animate-pulse', Delayed: 'bg-amber-400 animate-pulse', Halted: 'bg-red-500' };
 const SOS_STATUS_CONFIG = {
-  'Live Online': { icon: Wifi, cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' },
-  'SMS Fallback Alert': { icon: WifiOff, cls: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
+  'Live Online': { icon: Wifi, cls: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30' },
+  'SMS Fallback Alert': { icon: WifiOff, cls: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30' },
   'WhatsApp Voice SOS': { icon: Radio, cls: 'bg-violet-500/15 text-violet-300 border-violet-500/30' },
 };
 const SEVERITY_BADGE_CONFIG = {
-  Critical: 'bg-red-500/15 text-red-400 border-red-500/30',
-  Moderate: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
-  Informational: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
+  Critical: 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30',
+  Moderate: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
+  Informational: 'bg-sky-500/15 text-sky-600 dark:text-sky-400 border-sky-500/30',
 };
 const URGENCY_BADGE_CONFIG = {
-  CRITICAL: 'bg-red-500/15 text-red-400 border-red-500/30',
-  HIGH: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
-  MODERATE: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
+  CRITICAL: 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30',
+  HIGH: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
+  MODERATE: 'bg-sky-500/15 text-sky-600 dark:text-sky-400 border-sky-500/30',
 };
 
 /* ------------------------------------------------------------------ *
@@ -418,12 +447,12 @@ const URGENCY_BADGE_CONFIG = {
  * ------------------------------------------------------------------ */
 function StatPill({ icon: Icon, label, value, tone }) {
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2 sm:px-4 sm:py-2.5 min-w-[150px]">
+    <div className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-900/60 px-3 py-2 sm:px-4 sm:py-2.5 min-w-[150px]">
       <div className={cx('flex h-9 w-9 shrink-0 items-center justify-center rounded-md', tone.iconBg)}>
         <Icon className={cx('h-4.5 w-4.5', tone.iconText)} size={18} />
       </div>
       <div className="min-w-0">
-        <div className="text-[11px] uppercase tracking-wide text-slate-400 truncate">{label}</div>
+        <div className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400 truncate">{label}</div>
         <div className={cx('text-lg font-semibold leading-tight', tone.value)}>{value}</div>
       </div>
     </div>
@@ -455,7 +484,7 @@ function DispatchBadge({ dispatch, resolved }) {
       <span
         className={cx(
           'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
-          outcome.warning ? 'border-red-500/40 bg-red-500/15 text-red-300' : 'border-sky-500/40 bg-sky-500/15 text-sky-300'
+          outcome.warning ? 'border-red-500/40 bg-red-500/15 text-red-600 dark:text-red-300' : 'border-sky-500/40 bg-sky-500/15 text-sky-600 dark:text-sky-300'
         )}
       >
         {outcome.warning ? <AlertTriangle size={11} /> : <CheckCircle2 size={11} />} {outcome.label}
@@ -464,13 +493,13 @@ function DispatchBadge({ dispatch, resolved }) {
   }
   if (dispatch) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-400">
+      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
         <CheckCircle2 size={11} /> Rescue Dispatched
       </span>
     );
   }
   return (
-    <span className="inline-flex animate-pulse items-center gap-1 rounded-full border border-red-500/40 bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-400">
+    <span className="inline-flex animate-pulse items-center gap-1 rounded-full border border-red-500/40 bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-600 dark:text-red-400">
       <Siren size={11} /> Active SOS
     </span>
   );
@@ -482,7 +511,7 @@ function DispatchBadge({ dispatch, resolved }) {
 function DriverHistoryFlag({ history }) {
   if (!history || !history.falseAlarms) return null;
   return (
-    <div className="mt-1.5 flex items-center gap-1.5 rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-[10px] font-medium text-red-300">
+    <div className="mt-1.5 flex items-center gap-1.5 rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-[10px] font-medium text-red-600 dark:text-red-300">
       <AlertTriangle size={11} className="shrink-0" />
       {history.total} report{history.total === 1 ? '' : 's'} from this number · {history.falseAlarms} previously flagged false alarm{history.falseAlarms === 1 ? '' : 's'}
     </div>
@@ -502,7 +531,7 @@ function OutcomePicker({ onPick, onCancel }) {
   const [note, setNote] = useState('');
   return (
     <div className="mt-2 space-y-1.5 rounded-md border border-sky-500/30 bg-sky-500/10 p-2" onClick={(e) => e.stopPropagation()}>
-      <div className="text-[10px] font-semibold uppercase tracking-wide text-sky-300">Mark Resolved — outcome</div>
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-300">Mark Resolved — outcome</div>
       <div className="flex flex-wrap gap-1.5">
         {Object.entries(OUTCOME_CONFIG).map(([key, cfg]) => (
           <button
@@ -511,8 +540,8 @@ function OutcomePicker({ onPick, onCancel }) {
             className={cx(
               'rounded-md border px-2 py-1 text-[10px] font-medium transition',
               cfg.warning
-                ? 'border-red-500/40 bg-red-500/15 text-red-200 hover:bg-red-500/25'
-                : 'border-sky-500/40 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25'
+                ? 'border-red-500/40 bg-red-500/15 text-red-700 dark:text-red-200 hover:bg-red-500/25'
+                : 'border-sky-500/40 bg-sky-500/15 text-sky-700 dark:text-sky-200 hover:bg-sky-500/25'
             )}
           >
             {cfg.label}
@@ -523,16 +552,16 @@ function OutcomePicker({ onPick, onCancel }) {
         value={note}
         onChange={(e) => setNote(e.target.value)}
         placeholder="Optional note…"
-        className="w-full rounded-md border border-slate-700 bg-slate-950/70 px-2 py-1 text-[11px] text-slate-200 placeholder:text-slate-500 focus:border-sky-600 focus:outline-none"
+        className="w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-950/70 px-2 py-1 text-[11px] text-slate-800 dark:text-slate-200 placeholder:text-slate-500 dark:placeholder:text-slate-500 focus:border-sky-600 focus:outline-none"
       />
-      <button onClick={onCancel} className="text-[10px] text-slate-500 hover:text-slate-300">Cancel</button>
+      <button onClick={onCancel} className="text-[10px] text-slate-500 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300">Cancel</button>
     </div>
   );
 }
 
 function CategoryTag({ category }) {
   return (
-    <span className="inline-flex items-center rounded-full border border-slate-700 bg-slate-800/70 px-2 py-0.5 text-[10px] font-medium text-slate-300">
+    <span className="inline-flex items-center rounded-full border border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-800/70 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:text-slate-300">
       {category}
     </span>
   );
@@ -560,7 +589,7 @@ function TranscriptToggle({ transcript }) {
         <ChevronRight size={10} className={cx('transition-transform', open && 'rotate-90')} />
         {open ? 'Hide' : 'View'} Raw Transcript
       </button>
-      {open && <p className="mt-1 rounded-md bg-slate-900/60 p-1.5 text-[11px] italic text-slate-400">"{transcript}"</p>}
+      {open && <p className="mt-1 rounded-md bg-slate-100/80 dark:bg-slate-900/60 p-1.5 text-[11px] italic text-slate-500 dark:text-slate-400">"{transcript}"</p>}
     </div>
   );
 }
@@ -571,26 +600,26 @@ function TranscriptToggle({ transcript }) {
  * ------------------------------------------------------------------ */
 function HeatZonePanel({ zones, onClose, onDispatch, dispatchingId }) {
   return (
-    <div className="absolute inset-0 z-[2000] flex justify-end bg-slate-950/60" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="flex h-full w-full max-w-sm flex-col border-l border-slate-800 bg-slate-950 shadow-2xl">
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-800 px-4 py-3">
-          <span className="flex items-center gap-1.5 text-sm font-semibold text-orange-300"><Flame size={15} /> Active Heat Zones</span>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-300"><X size={16} /></button>
+    <div className="absolute inset-0 z-[2000] flex justify-end bg-white/70 dark:bg-slate-950/60" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="flex h-full w-full max-w-sm flex-col border-l border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 shadow-2xl">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 dark:border-slate-800 px-4 py-3">
+          <span className="flex items-center gap-1.5 text-sm font-semibold text-orange-600 dark:text-orange-300"><Flame size={15} /> Active Heat Zones</span>
+          <button onClick={onClose} className="text-slate-500 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300"><X size={16} /></button>
         </div>
         <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto p-3">
-          {zones.length === 0 && <div className="pt-10 text-center text-xs text-slate-500">No high-density clusters right now.</div>}
+          {zones.length === 0 && <div className="pt-10 text-center text-xs text-slate-500 dark:text-slate-500">No high-density clusters right now.</div>}
           {zones.map((z) => (
             <div key={z.zone_id} className={cx('rounded-lg border p-3', z.severity === 'CRITICAL' ? 'border-red-500/50 bg-red-500/10' : 'border-orange-500/40 bg-orange-500/10')}>
               <div className="mb-1 flex items-center justify-between">
-                <span className={cx('text-xs font-semibold', z.severity === 'CRITICAL' ? 'text-red-300' : 'text-orange-300')}>{z.top_hazard}</span>
-                <span className="text-[10px] uppercase tracking-wide text-slate-500">{z.severity}</span>
+                <span className={cx('text-xs font-semibold', z.severity === 'CRITICAL' ? 'text-red-600 dark:text-red-300' : 'text-orange-600 dark:text-orange-300')}>{z.top_hazard}</span>
+                <span className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-500">{z.severity}</span>
               </div>
-              <p className="text-[11px] text-slate-300">{z.label}</p>
-              <p className="mt-0.5 text-[10px] text-slate-500">{formatCoord(z.center_lat, z.center_lon)} · {z.total_reports} reports</p>
+              <p className="text-[11px] text-slate-600 dark:text-slate-300">{z.label}</p>
+              <p className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-500">{formatCoord(z.center_lat, z.center_lon)} · {z.total_reports} reports</p>
               <button
                 disabled={dispatchingId === z.zone_id}
                 onClick={() => onDispatch(z)}
-                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-orange-500/40 bg-orange-500/15 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-orange-300 transition hover:bg-orange-500/25 disabled:opacity-50"
+                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-orange-500/40 bg-orange-500/15 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-300 transition hover:bg-orange-500/25 disabled:opacity-50"
               >
                 <Truck size={12} /> {dispatchingId === z.zone_id ? 'Dispatching…' : 'Dispatch Group Taskforce'}
               </button>
@@ -605,46 +634,46 @@ function HeatZonePanel({ zones, onClose, onDispatch, dispatchingId }) {
 function RecoveryPanel({ stats, resolvedAlerts, onClose }) {
   const fmtMin = (m) => (m == null ? '—' : m < 1 ? '<1m' : `${Math.round(m)}m`);
   return (
-    <div className="absolute inset-0 z-[2000] flex justify-end bg-slate-950/60" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="flex h-full w-full max-w-sm flex-col border-l border-slate-800 bg-slate-950 shadow-2xl">
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-800 px-4 py-3">
-          <span className="flex items-center gap-1.5 text-sm font-semibold text-sky-300"><CheckCircle2 size={15} /> Recovery Analytics</span>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-300"><X size={16} /></button>
+    <div className="absolute inset-0 z-[2000] flex justify-end bg-white/70 dark:bg-slate-950/60" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="flex h-full w-full max-w-sm flex-col border-l border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 shadow-2xl">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 dark:border-slate-800 px-4 py-3">
+          <span className="flex items-center gap-1.5 text-sm font-semibold text-sky-600 dark:text-sky-300"><CheckCircle2 size={15} /> Recovery Analytics</span>
+          <button onClick={onClose} className="text-slate-500 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300"><X size={16} /></button>
         </div>
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
           <div className="grid grid-cols-2 gap-2.5">
-            <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
-              <div className="text-[10px] uppercase tracking-wide text-slate-500">Resolved Today</div>
-              <div className="mt-1 text-xl font-bold text-sky-300">{stats?.resolved_today ?? '—'}</div>
+            <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-900/60 p-3">
+              <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-500">Resolved Today</div>
+              <div className="mt-1 text-xl font-bold text-sky-600 dark:text-sky-300">{stats?.resolved_today ?? '—'}</div>
             </div>
-            <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
-              <div className="text-[10px] uppercase tracking-wide text-slate-500">Total Resolved</div>
-              <div className="mt-1 text-xl font-bold text-sky-300">{stats?.resolved_count ?? '—'}</div>
+            <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-900/60 p-3">
+              <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-500">Total Resolved</div>
+              <div className="mt-1 text-xl font-bold text-sky-600 dark:text-sky-300">{stats?.resolved_count ?? '—'}</div>
             </div>
-            <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
-              <div className="text-[10px] uppercase tracking-wide text-slate-500">Avg Response</div>
-              <div className="mt-1 text-xl font-bold text-emerald-300">{fmtMin(stats?.avg_response_minutes)}</div>
+            <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-900/60 p-3">
+              <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-500">Avg Response</div>
+              <div className="mt-1 text-xl font-bold text-emerald-600 dark:text-emerald-300">{fmtMin(stats?.avg_response_minutes)}</div>
             </div>
-            <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
-              <div className="text-[10px] uppercase tracking-wide text-slate-500">Avg Recovery</div>
-              <div className="mt-1 text-xl font-bold text-emerald-300">{fmtMin(stats?.avg_recovery_minutes)}</div>
+            <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-900/60 p-3">
+              <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-500">Avg Recovery</div>
+              <div className="mt-1 text-xl font-bold text-emerald-600 dark:text-emerald-300">{fmtMin(stats?.avg_recovery_minutes)}</div>
             </div>
           </div>
 
           <div>
-            <div className="mb-1.5 text-[10px] uppercase tracking-wide text-slate-500">Recently Closed Out</div>
-            {resolvedAlerts.length === 0 && <div className="pt-4 text-center text-xs text-slate-500">Nothing resolved yet.</div>}
+            <div className="mb-1.5 text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-500">Recently Closed Out</div>
+            {resolvedAlerts.length === 0 && <div className="pt-4 text-center text-xs text-slate-500 dark:text-slate-500">Nothing resolved yet.</div>}
             <div className="space-y-2">
               {resolvedAlerts.slice(0, 5).map((a) => {
                 const outcome = OUTCOME_CONFIG[a.outcome_type] || OUTCOME_CONFIG.OTHER;
                 return (
-                  <div key={a.id} className={cx('rounded-lg border p-2.5 text-[11px]', outcome.warning ? 'border-red-500/30 bg-red-500/5 text-red-100' : 'border-slate-800 bg-slate-900/50 text-slate-300')}>
+                  <div key={a.id} className={cx('rounded-lg border p-2.5 text-[11px]', outcome.warning ? 'border-red-500/30 bg-red-500/5 text-red-100' : 'border-slate-200 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-900/50 text-slate-600 dark:text-slate-300')}>
                     <div className="flex items-center justify-between">
-                      <span className={cx('font-medium', outcome.warning ? 'text-red-300' : 'text-slate-100')}>{outcome.warning && <AlertTriangle size={11} className="mr-1 inline" />}{outcome.label}</span>
-                      <span className="text-slate-500">{a.id}</span>
+                      <span className={cx('font-medium', outcome.warning ? 'text-red-600 dark:text-red-300' : 'text-slate-900 dark:text-slate-100')}>{outcome.warning && <AlertTriangle size={11} className="mr-1 inline" />}{outcome.label}</span>
+                      <span className="text-slate-500 dark:text-slate-500">{a.id}</span>
                     </div>
-                    <div className="text-slate-500">{formatCoord(a.lat, a.lng)}</div>
-                    {a.outcome_note && <div className="mt-0.5 italic text-slate-400">"{a.outcome_note}"</div>}
+                    <div className="text-slate-500 dark:text-slate-500">{formatCoord(a.lat, a.lng)}</div>
+                    {a.outcome_note && <div className="mt-0.5 italic text-slate-500 dark:text-slate-400">"{a.outcome_note}"</div>}
                   </div>
                 );
               })}
@@ -740,7 +769,8 @@ function SosMarker({ sos, onSelect, active, isNew, dispatch }) {
             {dispatch ? <Truck size={9} className="text-white" strokeWidth={2.5} /> : <Siren size={9} className="text-white" strokeWidth={2.5} />}
           </div>
         </div>,
-        [20, 20]
+        [20, 20],
+        [0, 18] // pushes the click-popup below the pin instead of Leaflet's default of above it - see popupAnchor in divIcon()
       ),
     [isNew, active, dispatch]
   );
@@ -751,6 +781,20 @@ function SosMarker({ sos, onSelect, active, isNew, dispatch }) {
           ? `✅ Rescue Dispatched · ETA ${dispatch.etaMin}m${cityName ? ` | ${cityName}` : ''} | Lat: ${sos.lat.toFixed(4)}, Lon: ${sos.lng.toFixed(4)}`
           : `🚨 SOS Active${cityName ? ` | ${cityName}` : ''} | Lat: ${sos.lat.toFixed(4)}, Lon: ${sos.lng.toFixed(4)}`}
       </Tooltip>
+      {/* Quick glanceable when/where on click - the fuller detail (dispatch
+          controls, outcome, history) still lives in the existing bottom-
+          right selection card; this is just the fast answer to "what is
+          this pin and when did it come in," right at the pin itself. */}
+      <Popup minWidth={170} closeButton={false}>
+        <div className="space-y-0.5 text-[12px]">
+          <div className="flex items-center gap-1 font-semibold text-slate-900">
+            <Clock size={12} /> {timeAgo(sos.timestamp, new Date())}
+          </div>
+          <div className="flex items-center gap-1 text-slate-700">
+            <MapPin size={12} /> {cityName || `${sos.lat.toFixed(4)}°, ${sos.lng.toFixed(4)}°`}
+          </div>
+        </div>
+      </Popup>
     </Marker>
   );
 }
@@ -945,6 +989,7 @@ export default function Dashboard({ alerts = [] }) {
   const [flyTarget, setFlyTarget] = useState(null); // {lat, lng, key} — flyTo target for the live map
   const [layers, setLayers] = useState({ convoys: true, sos: true, routes: true, hazards: true });
   const [layersOpen, setLayersOpen] = useState(false);
+  const [mapType, setMapType] = useState('normal'); // 'normal' | 'satellite' | 'physical'
 
   // Heat Zones — isolated add-on state, own polling, doesn't touch the main
   // alerts/hazards/corridors polling effect below.
@@ -1419,25 +1464,25 @@ export default function Dashboard({ alerts = [] }) {
   }, [backendAlerts]);
 
   return (
-    <div className="flex h-screen w-full flex-col overflow-hidden bg-slate-950 text-slate-100">
+    <div className="flex h-screen w-full flex-col overflow-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
       {/* ---------------- Header ---------------- */}
-      <header className="flex shrink-0 flex-col gap-3 border-b border-slate-800 bg-slate-900/70 px-4 py-3 backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-6">
+      <header className="flex shrink-0 flex-col gap-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/70 px-4 py-3 backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-sky-500 to-emerald-500 shadow-lg shadow-sky-500/20">
             <Shield size={20} className="text-slate-950" strokeWidth={2.5} />
           </div>
           <div>
-            <h1 className="text-sm font-bold tracking-wide text-slate-100 sm:text-base">SETU DISASTER LOGISTICS COMMAND CENTER</h1>
-            <p className="text-[11px] text-slate-400">AI-Powered Emergency Response — Pan-India Multi-Hazard Coverage</p>
+            <h1 className="text-sm font-bold tracking-wide text-slate-900 dark:text-slate-100 sm:text-base">SETU DISASTER LOGISTICS COMMAND CENTER</h1>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">AI-Powered Emergency Response — Pan-India Multi-Hazard Coverage</p>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          <StatPill icon={Truck} label="Active Convoys" value={`${stats.activeConvoys}/${stats.totalConvoys}`} tone={{ iconBg: 'bg-sky-500/15', iconText: 'text-sky-400', value: 'text-slate-100' }} />
-          <StatPill icon={Siren} label="Active SOS" value={stats.activeSOS} tone={{ iconBg: 'bg-red-500/15', iconText: 'text-red-400', value: 'text-red-400' }} />
-          <StatPill icon={AlertTriangle} label="Critical Blockades" value={stats.criticalBlockades} tone={{ iconBg: 'bg-red-500/15', iconText: 'text-red-400', value: 'text-red-400' }} />
-          <StatPill icon={Building2} label="Isolated Districts" value={stats.isolatedDistricts} tone={{ iconBg: 'bg-amber-500/15', iconText: 'text-amber-400', value: 'text-amber-400' }} />
-          <StatPill icon={Signal} label="Network Health" value={`${stats.networkHealth}%`} tone={{ iconBg: 'bg-emerald-500/15', iconText: 'text-emerald-400', value: 'text-emerald-400' }} />
+          <StatPill icon={Truck} label="Active Convoys" value={`${stats.activeConvoys}/${stats.totalConvoys}`} tone={{ iconBg: 'bg-sky-500/15', iconText: 'text-sky-600 dark:text-sky-400', value: 'text-slate-900 dark:text-slate-100' }} />
+          <StatPill icon={Siren} label="Active SOS" value={stats.activeSOS} tone={{ iconBg: 'bg-red-500/15', iconText: 'text-red-600 dark:text-red-400', value: 'text-red-600 dark:text-red-400' }} />
+          <StatPill icon={AlertTriangle} label="Critical Blockades" value={stats.criticalBlockades} tone={{ iconBg: 'bg-red-500/15', iconText: 'text-red-600 dark:text-red-400', value: 'text-red-600 dark:text-red-400' }} />
+          <StatPill icon={Building2} label="Isolated Districts" value={stats.isolatedDistricts} tone={{ iconBg: 'bg-amber-500/15', iconText: 'text-amber-600 dark:text-amber-400', value: 'text-amber-600 dark:text-amber-400' }} />
+          <StatPill icon={Signal} label="Network Health" value={`${stats.networkHealth}%`} tone={{ iconBg: 'bg-emerald-500/15', iconText: 'text-emerald-600 dark:text-emerald-400', value: 'text-emerald-600 dark:text-emerald-400' }} />
 
           <button
             onClick={addSimulatedSOS}
@@ -1448,20 +1493,20 @@ export default function Dashboard({ alerts = [] }) {
 
           <button
             onClick={() => setHeatZonesOpen(true)}
-            className="flex items-center gap-1.5 rounded-lg border border-orange-500/40 bg-orange-500/15 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-orange-300 transition hover:bg-orange-500/25"
+            className="flex items-center gap-1.5 rounded-lg border border-orange-500/40 bg-orange-500/15 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-300 transition hover:bg-orange-500/25"
           >
             <Flame size={15} /> Active Heat Zones ({heatZones.length})
           </button>
 
           <button
             onClick={() => setRecoveryOpen(true)}
-            className="flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/15 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-sky-300 transition hover:bg-sky-500/25"
+            className="flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/15 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-300 transition hover:bg-sky-500/25"
           >
             <CheckCircle2 size={15} /> Recovery Analytics
           </button>
 
           <div
-            className="hidden items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2 text-xs text-slate-300 lg:flex"
+            className="hidden items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-900/60 px-3 py-2 text-xs text-slate-600 dark:text-slate-300 lg:flex"
             title={
               liveConnStatus === 'reconnecting'
                 ? "Lost contact with the live SOS feed - retrying automatically. The free-tier backend can take 10-15s to wake up after being idle; already-loaded alerts stay on screen while this reconnects."
@@ -1479,7 +1524,7 @@ export default function Dashboard({ alerts = [] }) {
             </span>
             <Clock size={13} />
             {now.toLocaleTimeString('en-IN', { hour12: false })}
-            {liveConnStatus === 'reconnecting' && <span className="font-semibold text-amber-400">Reconnecting…</span>}
+            {liveConnStatus === 'reconnecting' && <span className="font-semibold text-amber-600 dark:text-amber-400">Reconnecting…</span>}
           </div>
         </div>
       </header>
@@ -1488,7 +1533,7 @@ export default function Dashboard({ alerts = [] }) {
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* ---- Map viewport ---- */}
         <div className="relative flex min-h-[360px] flex-1 overflow-hidden bg-[#050810] p-3 sm:p-6">
-          <div className="relative h-full w-full overflow-hidden rounded-2xl border border-slate-800 shadow-2xl ring-1 ring-slate-800/60">
+          <div className="relative h-full w-full overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl ring-1 ring-slate-800/60">
             <MapContainer
               center={INDIA_CENTER}
               zoom={DEFAULT_ZOOM}
@@ -1499,7 +1544,13 @@ export default function Dashboard({ alerts = [] }) {
               zoomControl={false}
               className="absolute inset-0 h-full w-full"
             >
-              <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} />
+              <TileLayer
+                key={mapType}
+                url={MAP_TYPES[mapType].url}
+                attribution={MAP_TYPES[mapType].attribution}
+                maxNativeZoom={MAP_TYPES[mapType].maxNativeZoom}
+                subdomains={MAP_TYPES[mapType].subdomains || 'abc'}
+              />
               <MapFlyTo target={flyTarget} />
               <MapControls onZoomIn={zoomInRef} onZoomOut={zoomOutRef} onReset={resetViewRef} />
 
@@ -1509,35 +1560,61 @@ export default function Dashboard({ alerts = [] }) {
                 <ConvoyMarker key={c.id} convoy={c} onSelect={(v) => setSelected({ kind: 'convoy', ...v })} active={selected?.kind === 'convoy' && selected.id === c.id} />
               ))}
               {layers.sos && [...driverSos.filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lng)), ...sosPings].map((s) => (
-                <SosMarker key={s.id} sos={s} isNew={s.id === flashId} dispatch={dispatched[s.id]} onSelect={(v) => setSelected({ kind: 'sos', ...v })} active={selected?.kind === 'sos' && selected.id === s.id} />
+                <SosMarker
+                  key={s.id}
+                  sos={s}
+                  isNew={s.id === flashId}
+                  dispatch={dispatched[s.id]}
+                  onSelect={(v) => {
+                    setSelected({ kind: 'sos', ...v });
+                    flyToCoordinate(v.lat, v.lng);
+                  }}
+                  active={selected?.kind === 'sos' && selected.id === s.id}
+                />
               ))}
               {layers.hazards && liveHazards.map((h) => (
                 <HazardMarker key={h.id} hazard={h} onSelect={(v) => setSelected({ kind: 'hazard', ...v })} active={selected?.kind === 'hazard' && selected.id === h.id} />
               ))}
             </MapContainer>
 
+            {/* map type switcher */}
+            <div className="absolute left-3 top-3 z-[1000] flex overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800 bg-white/85 dark:bg-slate-950/85 text-[11px] font-medium shadow-lg backdrop-blur">
+              {Object.entries(MAP_TYPES).map(([key, cfg]) => (
+                <button
+                  key={key}
+                  onClick={() => setMapType(key)}
+                  className={cx(
+                    'px-2.5 py-1.5 transition',
+                    mapType === key ? 'bg-sky-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  )}
+                >
+                  {cfg.label}
+                </button>
+              ))}
+            </div>
+
             {/* legend */}
-            <div className="pointer-events-none absolute bottom-3 left-3 z-[1000] rounded-lg border border-slate-800 bg-slate-950/85 px-3 py-2 text-[11px] backdrop-blur">
-              <div className="mb-1.5 font-semibold uppercase tracking-wide text-slate-400">Route Risk</div>
+            <div className="pointer-events-none absolute bottom-3 left-3 z-[1000] rounded-lg border border-slate-200 dark:border-slate-800 bg-white/85 dark:bg-slate-950/85 px-3 py-2 text-[11px] backdrop-blur">
+              <div className="mb-1.5 font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Route Risk</div>
               {Object.entries(RISK_CONFIG).map(([key, cfg]) => (
                 <div key={key} className="flex items-center gap-1.5 py-0.5">
                   <span className="h-2 w-4 rounded-full" style={{ backgroundColor: cfg.stroke }} />
-                  <span className="text-slate-300">{cfg.label}</span>
+                  <span className="text-slate-600 dark:text-slate-300">{cfg.label}</span>
                 </div>
               ))}
             </div>
 
             {/* zoom + layer controls */}
             <div className="absolute right-3 top-3 z-[1000] flex flex-col gap-1.5">
-              <button onClick={() => zoomInRef.current()} className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-800 bg-slate-950/85 text-slate-300 hover:bg-slate-800"><ZoomIn size={15} /></button>
-              <button onClick={() => zoomOutRef.current()} className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-800 bg-slate-950/85 text-slate-300 hover:bg-slate-800"><ZoomOut size={15} /></button>
-              <button onClick={() => resetViewRef.current()} className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-800 bg-slate-950/85 text-slate-300 hover:bg-slate-800"><Navigation size={14} /></button>
+              <button onClick={() => zoomInRef.current()} className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 dark:border-slate-800 bg-white/85 dark:bg-slate-950/85 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"><ZoomIn size={15} /></button>
+              <button onClick={() => zoomOutRef.current()} className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 dark:border-slate-800 bg-white/85 dark:bg-slate-950/85 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"><ZoomOut size={15} /></button>
+              <button onClick={() => resetViewRef.current()} className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 dark:border-slate-800 bg-white/85 dark:bg-slate-950/85 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"><Navigation size={14} /></button>
               <div className="relative">
-                <button onClick={() => setLayersOpen((o) => !o)} className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-800 bg-slate-950/85 text-slate-300 hover:bg-slate-800"><Layers size={15} /></button>
+                <button onClick={() => setLayersOpen((o) => !o)} className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 dark:border-slate-800 bg-white/85 dark:bg-slate-950/85 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"><Layers size={15} /></button>
                 {layersOpen && (
-                  <div className="absolute right-9 top-0 w-40 rounded-lg border border-slate-800 bg-slate-950/95 p-2 text-[11px] shadow-xl">
+                  <div className="absolute right-9 top-0 w-40 rounded-lg border border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 p-2 text-[11px] shadow-xl">
                     {Object.keys(layers).map((k) => (
-                      <label key={k} className="flex items-center gap-2 py-1 capitalize text-slate-300">
+                      <label key={k} className="flex items-center gap-2 py-1 capitalize text-slate-600 dark:text-slate-300">
                         <input type="checkbox" checked={layers[k]} onChange={() => toggleLayer(k)} className="accent-sky-500" />
                         {k}
                       </label>
@@ -1549,30 +1626,30 @@ export default function Dashboard({ alerts = [] }) {
 
             {/* selection detail card */}
             {selected && (
-              <div className="absolute bottom-3 right-3 z-[1000] w-72 rounded-xl border border-slate-700 bg-slate-950/95 p-3 text-xs shadow-2xl backdrop-blur">
+              <div className="absolute bottom-3 right-3 z-[1000] w-72 rounded-xl border border-slate-300 dark:border-slate-700 bg-white/95 dark:bg-slate-950/95 p-3 text-xs shadow-2xl backdrop-blur">
                 <div className="mb-2 flex items-start justify-between">
-                  <span className="font-semibold text-slate-100">{selected.id}</span>
-                  <button onClick={() => setSelected(null)} className="text-slate-500 hover:text-slate-300"><X size={14} /></button>
+                  <span className="font-semibold text-slate-900 dark:text-slate-100">{selected.id}</span>
+                  <button onClick={() => setSelected(null)} className="text-slate-500 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300"><X size={14} /></button>
                 </div>
                 {selected.kind === 'convoy' ? (
-                  <div className="space-y-1 text-slate-300">
-                    <div>Cargo: <span className="text-slate-100">{selected.cargoType}</span> ({selected.priority})</div>
-                    <div>Status: <span className="text-slate-100">{selected.status}</span></div>
+                  <div className="space-y-1 text-slate-600 dark:text-slate-300">
+                    <div>Cargo: <span className="text-slate-900 dark:text-slate-100">{selected.cargoType}</span> ({selected.priority})</div>
+                    <div>Status: <span className="text-slate-900 dark:text-slate-100">{selected.status}</span></div>
                     <div>Route: {selected.route} → {selected.destination}</div>
                     <div>Driver: {selected.driver} · ETA: {selected.eta}</div>
                     <div>{formatCoord(selected.lat, selected.lng)}</div>
                   </div>
                 ) : selected.kind === 'hazard' ? (
-                  <div className="space-y-1 text-slate-300">
-                    <div className="text-slate-100 font-medium">{selected.type}</div>
+                  <div className="space-y-1 text-slate-600 dark:text-slate-300">
+                    <div className="text-slate-900 dark:text-slate-100 font-medium">{selected.type}</div>
                     <div>{selected.description || 'No additional details provided.'}</div>
                     <div>{formatCoord(selected.latitude, selected.longitude)}</div>
-                    <div className="text-amber-300">
+                    <div className="text-amber-600 dark:text-amber-300">
                       Confirmed by {selected.confirmations} report{selected.confirmations > 1 ? 's' : ''}
                     </div>
                   </div>
                 ) : (
-                  <div className="space-y-1 text-slate-300">
+                  <div className="space-y-1 text-slate-600 dark:text-slate-300">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <DispatchBadge dispatch={dispatched[selected.id]} resolved={resolved[selected.id]} />
                       <SosStatusBadge status={selected.status} />
@@ -1580,24 +1657,24 @@ export default function Dashboard({ alerts = [] }) {
                       {selected.severity && <SeverityBadge severity={selected.severity} />}
                     </div>
                     <DriverHistoryFlag history={driverHistoryByPhone[selected.reportedBy]} />
-                    <div className="pt-1">{selected.vehicleType} — <span className="text-red-400 font-medium">{selected.cargoPriority}</span></div>
+                    <div className="pt-1">{selected.vehicleType} — <span className="text-red-600 dark:text-red-400 font-medium">{selected.cargoPriority}</span></div>
                     <div>{selected.district}{selected.state ? `, ${selected.state}` : ''}</div>
                     <div>{selected.locationLabel || formatCoord(selected.lat, selected.lng)}</div>
-                    <div className="pt-1 text-slate-400">{selected.message}</div>
-                    {selected.note && <div className="pt-1 italic text-slate-400">"{selected.note}"</div>}
+                    <div className="pt-1 text-slate-500 dark:text-slate-400">{selected.message}</div>
+                    {selected.note && <div className="pt-1 italic text-slate-500 dark:text-slate-400">"{selected.note}"</div>}
                     {resolved[selected.id] ? (
-                      <div className="mt-2 space-y-1 rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-1.5 text-sky-300">
+                      <div className="mt-2 space-y-1 rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-1.5 text-sky-600 dark:text-sky-300">
                         <div className="flex items-center gap-1.5"><CheckCircle2 size={12} /> Resolved {timeAgo(resolved[selected.id].resolvedAt, now)}</div>
                         {selected.receivedAt && (
-                          <div className="text-sky-200/70">
+                          <div className="text-sky-700/80 dark:text-sky-200/70">
                             Closed {timeAgoMinutes(selected.receivedAt, resolved[selected.id].resolvedAt)} after report
                           </div>
                         )}
-                        {resolved[selected.id].outcomeNote && <div className="italic text-sky-200/80">"{resolved[selected.id].outcomeNote}"</div>}
+                        {resolved[selected.id].outcomeNote && <div className="italic text-sky-700/90 dark:text-sky-200/80">"{resolved[selected.id].outcomeNote}"</div>}
                       </div>
                     ) : dispatched[selected.id] ? (
                       <>
-                        <div className="mt-2 flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5 text-emerald-300">
+                        <div className="mt-2 flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5 text-emerald-600 dark:text-emerald-300">
                           <Truck size={12} /> QRT from {dispatched[selected.id].depotName} · ETA {dispatched[selected.id].etaMin}m
                         </div>
                         {resolvingId === selected.id ? (
@@ -1605,7 +1682,7 @@ export default function Dashboard({ alerts = [] }) {
                         ) : (
                           <button
                             onClick={() => setResolvingId(selected.id)}
-                            className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-sky-500/40 bg-sky-500/15 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-sky-300 transition hover:bg-sky-500/25"
+                            className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-sky-500/40 bg-sky-500/15 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-300 transition hover:bg-sky-500/25"
                           >
                             <CheckCircle2 size={12} /> Mark Resolved
                           </button>
@@ -1614,7 +1691,7 @@ export default function Dashboard({ alerts = [] }) {
                     ) : (
                       <button
                         onClick={() => dispatchQrt(selected)}
-                        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/15 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-300 transition hover:bg-amber-500/25"
+                        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/15 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-300 transition hover:bg-amber-500/25"
                       >
                         <Truck size={12} /> Acknowledge &amp; Dispatch QRT
                       </button>
@@ -1644,15 +1721,15 @@ export default function Dashboard({ alerts = [] }) {
         </div>
 
         {/* ---- Sidebar ---- */}
-        <aside className="flex w-full shrink-0 flex-col border-t border-slate-800 bg-slate-900/50 lg:h-full lg:w-[400px] lg:border-l lg:border-t-0">
-          <div className="shrink-0 space-y-3 border-b border-slate-800 p-3">
+        <aside className="flex w-full shrink-0 flex-col border-t border-slate-200 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-900/50 lg:h-full lg:w-[400px] lg:border-l lg:border-t-0">
+          <div className="shrink-0 space-y-3 border-b border-slate-200 dark:border-slate-800 p-3">
             <div className="relative">
-              <Search size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+              <Search size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-500" />
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search district, vehicle, cargo, route…"
-                className="w-full rounded-lg border border-slate-800 bg-slate-950/70 py-2 pl-8 pr-3 text-xs text-slate-200 placeholder:text-slate-500 focus:border-sky-600 focus:outline-none"
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-950/70 py-2 pl-8 pr-3 text-xs text-slate-800 dark:text-slate-200 placeholder:text-slate-500 dark:placeholder:text-slate-500 focus:border-sky-600 focus:outline-none"
               />
             </div>
             <div className="flex flex-wrap gap-1.5">
@@ -1662,7 +1739,7 @@ export default function Dashboard({ alerts = [] }) {
                   onClick={() => setStateFilter(s)}
                   className={cx(
                     'rounded-full border px-2.5 py-1 text-[11px] font-medium transition',
-                    stateFilter === s ? 'border-sky-500 bg-sky-500/15 text-sky-300' : 'border-slate-800 bg-slate-950/50 text-slate-400 hover:border-slate-700'
+                    stateFilter === s ? 'border-sky-500 bg-sky-500/15 text-sky-600 dark:text-sky-300' : 'border-slate-200 dark:border-slate-800 bg-white/60 dark:bg-slate-950/50 text-slate-500 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
                   )}
                 >
                   {s}
@@ -1671,18 +1748,18 @@ export default function Dashboard({ alerts = [] }) {
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center justify-between border-b border-slate-800 px-3 py-2 text-[11px] uppercase tracking-wide text-slate-400">
-            <span className="flex items-center gap-1.5"><Radio size={13} className="text-red-400" /> Live Alert Feed</span>
+          <div className="flex shrink-0 items-center justify-between border-b border-slate-200 dark:border-slate-800 px-3 py-2 text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            <span className="flex items-center gap-1.5"><Radio size={13} className="text-red-600 dark:text-red-400" /> Live Alert Feed</span>
             <div className="flex items-center gap-1.5">
               <button
                 onClick={() => setFeedTab('active')}
-                className={cx('rounded-full border px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal', feedTab === 'active' ? 'border-sky-500 bg-sky-500/15 text-sky-300' : 'border-slate-800 text-slate-500 hover:border-slate-700')}
+                className={cx('rounded-full border px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal', feedTab === 'active' ? 'border-sky-500 bg-sky-500/15 text-sky-600 dark:text-sky-300' : 'border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-500 hover:border-slate-300 dark:hover:border-slate-700')}
               >
                 Active
               </button>
               <button
                 onClick={() => setFeedTab('resolved')}
-                className={cx('rounded-full border px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal', feedTab === 'resolved' ? 'border-sky-500 bg-sky-500/15 text-sky-300' : 'border-slate-800 text-slate-500 hover:border-slate-700')}
+                className={cx('rounded-full border px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal', feedTab === 'resolved' ? 'border-sky-500 bg-sky-500/15 text-sky-600 dark:text-sky-300' : 'border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-500 hover:border-slate-300 dark:hover:border-slate-700')}
               >
                 Resolved
               </button>
@@ -1692,7 +1769,7 @@ export default function Dashboard({ alerts = [] }) {
 
           <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
             {feed.length === 0 && (
-              <div className="pt-10 text-center text-xs text-slate-500">
+              <div className="pt-10 text-center text-xs text-slate-500 dark:text-slate-500">
                 {feedTab === 'resolved' ? 'No SOS alerts resolved yet this session.' : 'No alerts match the current filters.'}
               </div>
             )}
@@ -1704,14 +1781,14 @@ export default function Dashboard({ alerts = [] }) {
                   onClick={() => setSelected({ kind: 'sos', ...item })}
                   className={cx(
                     'cursor-pointer rounded-lg border p-3 transition',
-                    item.id === flashId ? 'border-red-500 bg-red-500/10 animate-pulse' : 'border-slate-800 bg-slate-950/50 hover:border-slate-700'
+                    item.id === flashId ? 'border-red-500 bg-red-500/10 animate-pulse' : 'border-slate-200 dark:border-slate-800 bg-white/60 dark:bg-slate-950/50 hover:border-slate-300 dark:hover:border-slate-700'
                   )}
                 >
                   <div className="mb-1.5 flex items-center justify-between">
-                    <span className="flex items-center gap-1.5 text-xs font-semibold text-red-400">
+                    <span className="flex items-center gap-1.5 text-xs font-semibold text-red-600 dark:text-red-400">
                       <Siren size={13} /> SOS · {item.id}
                     </span>
-                    <span className="text-[10px] text-slate-500">{item.timeLabel || timeAgo(item.timestamp, now)}</span>
+                    <span className="text-[10px] text-slate-500 dark:text-slate-500">{item.timeLabel || timeAgo(item.timestamp, now)}</span>
                   </div>
                   <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
                     <DispatchBadge dispatch={dispatched[item.id]} resolved={resolved[item.id]} />
@@ -1720,13 +1797,13 @@ export default function Dashboard({ alerts = [] }) {
                     {item.severity && <SeverityBadge severity={item.severity} />}
                   </div>
                   <DriverHistoryFlag history={driverHistoryByPhone[item.reportedBy]} />
-                  <div className="space-y-0.5 text-[11px] text-slate-300">
-                    <div className="text-slate-100 font-medium">{item.cargoPriority}</div>
+                  <div className="space-y-0.5 text-[11px] text-slate-600 dark:text-slate-300">
+                    <div className="text-slate-900 dark:text-slate-100 font-medium">{item.cargoPriority}</div>
                     <div>{item.vehicleType} · {item.district}{item.state ? `, ${item.state}` : ''}</div>
-                    <div className="text-slate-500">{item.locationLabel || formatCoord(item.lat, item.lng)}</div>
+                    <div className="text-slate-500 dark:text-slate-500">{item.locationLabel || formatCoord(item.lat, item.lng)}</div>
                   </div>
-                  <p className="mt-1.5 text-[11px] text-slate-400">{item.message}</p>
-                  {item.note && <p className="mt-1 text-[11px] italic text-slate-400">"{item.note}"</p>}
+                  <p className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400">{item.message}</p>
+                  {item.note && <p className="mt-1 text-[11px] italic text-slate-500 dark:text-slate-400">"{item.note}"</p>}
                   {item.isVoice && (
                     <div className="mt-1.5 space-y-1 rounded-md border border-violet-500/30 bg-violet-500/10 p-2">
                       <div className="flex items-center gap-1.5">
@@ -1734,7 +1811,7 @@ export default function Dashboard({ alerts = [] }) {
                         <span className="text-[10px] font-semibold uppercase tracking-wide text-violet-300">AI Voice Triage</span>
                         {item.urgency && <UrgencyBadge urgency={item.urgency} />}
                       </div>
-                      {item.summary && <p className="text-[11px] text-slate-200">{item.summary}</p>}
+                      {item.summary && <p className="text-[11px] text-slate-800 dark:text-slate-200">{item.summary}</p>}
                       {item.actionNeeded && (
                         <p className="text-[11px] text-violet-200"><span className="font-semibold">Action needed:</span> {item.actionNeeded}</p>
                       )}
@@ -1742,17 +1819,17 @@ export default function Dashboard({ alerts = [] }) {
                     </div>
                   )}
                   {resolved[item.id] ? (
-                    <div className="mt-2 space-y-1 rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-1.5 text-[11px] text-sky-300">
+                    <div className="mt-2 space-y-1 rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-1.5 text-[11px] text-sky-600 dark:text-sky-300">
                       <div className="flex items-center gap-1.5">
                         <CheckCircle2 size={12} />
                         {(OUTCOME_CONFIG[resolved[item.id].outcomeType] || OUTCOME_CONFIG.OTHER).label}
                         {item.receivedAt && ` · closed ${timeAgoMinutes(item.receivedAt, resolved[item.id].resolvedAt)} after report`}
                       </div>
-                      {resolved[item.id].outcomeNote && <div className="italic text-sky-200/80">"{resolved[item.id].outcomeNote}"</div>}
+                      {resolved[item.id].outcomeNote && <div className="italic text-sky-700/90 dark:text-sky-200/80">"{resolved[item.id].outcomeNote}"</div>}
                     </div>
                   ) : dispatched[item.id] ? (
                     <>
-                      <div className="mt-2 flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5 text-[11px] text-emerald-300">
+                      <div className="mt-2 flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5 text-[11px] text-emerald-600 dark:text-emerald-300">
                         <Truck size={12} /> QRT from {dispatched[item.id].depotName} · ETA {dispatched[item.id].etaMin}m
                       </div>
                       {resolvingId === item.id ? (
@@ -1760,7 +1837,7 @@ export default function Dashboard({ alerts = [] }) {
                       ) : (
                         <button
                           onClick={(e) => { e.stopPropagation(); setResolvingId(item.id); }}
-                          className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-sky-500/40 bg-sky-500/15 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-sky-300 transition hover:bg-sky-500/25"
+                          className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-sky-500/40 bg-sky-500/15 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-300 transition hover:bg-sky-500/25"
                         >
                           <CheckCircle2 size={12} /> Mark Resolved
                         </button>
@@ -1769,7 +1846,7 @@ export default function Dashboard({ alerts = [] }) {
                   ) : (
                     <button
                       onClick={(e) => { e.stopPropagation(); dispatchQrt(item); }}
-                      className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/15 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-300 transition hover:bg-amber-500/25"
+                      className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/15 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-300 transition hover:bg-amber-500/25"
                     >
                       <Truck size={12} /> Acknowledge &amp; Dispatch QRT
                     </button>
@@ -1780,27 +1857,27 @@ export default function Dashboard({ alerts = [] }) {
                   key={item.id}
                   onClick={() => setSelected(null)}
                   className={cx(
-                    'cursor-pointer rounded-lg border-l-4 border border-slate-800 bg-slate-950/50 p-3 hover:border-slate-700',
+                    'cursor-pointer rounded-lg border-l-4 border border-slate-200 dark:border-slate-800 bg-white/60 dark:bg-slate-950/50 p-3 hover:border-slate-300 dark:hover:border-slate-700',
                     item.severity === 'blocked' && 'border-l-red-500',
                     item.severity === 'moderate' && 'border-l-amber-500',
                     item.severity === 'safe' && 'border-l-sky-500'
                   )}
                 >
                   <div className="mb-1 flex items-center justify-between">
-                    <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-200">
-                      {item.severity === 'blocked' ? <AlertTriangle size={13} className="text-red-400" /> : item.severity === 'moderate' ? <CloudRain size={13} className="text-amber-400" /> : <CheckCircle2 size={13} className="text-sky-400" />}
+                    <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                      {item.severity === 'blocked' ? <AlertTriangle size={13} className="text-red-600 dark:text-red-400" /> : item.severity === 'moderate' ? <CloudRain size={13} className="text-amber-600 dark:text-amber-400" /> : <CheckCircle2 size={13} className="text-sky-600 dark:text-sky-400" />}
                       {item.title}
                     </span>
-                    <span className="text-[10px] text-slate-500">{timeAgo(item.timestamp, now)}</span>
+                    <span className="text-[10px] text-slate-500 dark:text-slate-500">{timeAgo(item.timestamp, now)}</span>
                   </div>
-                  <div className="text-[11px] text-slate-400">{item.route} · {item.district}, {item.state}</div>
-                  <p className="mt-1 text-[11px] text-slate-400">{item.message}</p>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">{item.route} · {item.district}, {item.state}</div>
+                  <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{item.message}</p>
                 </div>
               )
             )}
           </div>
 
-          <div className="flex shrink-0 items-center justify-between border-t border-slate-800 px-3 py-2 text-[10px] text-slate-500">
+          <div className="flex shrink-0 items-center justify-between border-t border-slate-200 dark:border-slate-800 px-3 py-2 text-[10px] text-slate-500 dark:text-slate-500">
             <span className="flex items-center gap-1.5"><Mountain size={12} /> {routes.length} corridors monitored</span>
             <button
               onClick={() => {
@@ -1809,7 +1886,7 @@ export default function Dashboard({ alerts = [] }) {
                 fetchHazards();
                 refreshCorridors();
               }}
-              className="flex items-center gap-1 text-slate-400 hover:text-slate-200"
+              className="flex items-center gap-1 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
             >
               <RefreshCw size={11} /> Synced {timeAgo(now, now)}
             </button>
