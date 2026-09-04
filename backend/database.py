@@ -205,12 +205,19 @@ def find_recent_duplicate_sos(
     radius_km: float = SOS_DEDUP_RADIUS_KM,
     window_minutes: float = SOS_DEDUP_WINDOW_MINUTES,
 ) -> Optional[dict]:
-    """Finds this same reporter's own most recent SOS if it was sent from
-    nearby within the last window_minutes - so mashing the SOS button (or a
-    flaky connection retrying the same request) confirms/returns the
-    existing alert instead of flooding the map with duplicates. Scoped to
-    reported_by so it can never suppress a second driver's genuinely
-    separate distress call from the same spot."""
+    """Finds this same reporter's own most recent STILL-ACTIVE SOS if it was
+    sent from nearby within the last window_minutes - so mashing the SOS
+    button (or a flaky connection retrying the same request) confirms/
+    returns the existing alert instead of flooding the map with duplicates.
+    Scoped to reported_by so it can never suppress a second driver's
+    genuinely separate distress call from the same spot.
+
+    Explicitly skips RESOLVED alerts - a closed incident is done, so a new
+    report from the same person/place shortly after is a genuinely separate
+    (possibly recurring) incident, not a duplicate of the old one. Before
+    this check existed, a new report within the window silently returned
+    the old already-resolved row unchanged, making the new report
+    invisible on the Active feed - confirmed happening live."""
     if not reported_by:
         return None
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
@@ -226,6 +233,8 @@ def find_recent_duplicate_sos(
             received = received.replace(tzinfo=timezone.utc)
         if received < cutoff:
             break  # rows are newest-first, so nothing after this is in-window either
+        if row.get("status") == "RESOLVED":
+            continue
         if _haversine_km(latitude, longitude, row["latitude"], row["longitude"]) <= radius_km:
             return row
     return None
