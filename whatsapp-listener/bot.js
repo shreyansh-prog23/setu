@@ -60,12 +60,20 @@ async function startBot() {
       console.log("Ignoring group voice message from:", sender);
       return;
     }
+    // Newer WhatsApp multi-device routing sometimes addresses the chat by a
+    // LID ("Linked ID", e.g. "195313788788736@lid") instead of the real
+    // phone-number JID - remoteJid in that case is a meaningless internal
+    // number, not anything attributable to a person. Baileys exposes the
+    // real phone number separately as senderPn precisely for this case;
+    // remoteJid itself is still correct (and required) as the address to
+    // reply to below, so only the value reported to the backend changes.
+    const phoneJid = msg.key.senderPn || sender;
     // WhatsApp JIDs are bare digits ("919876543210@s.whatsapp.net") - Twilio's
     // channel reports phones as E.164 with a "+" ("whatsapp:+919876543210").
     // Without normalizing here, the same person messaging through both
     // channels would show up as two different "contacts", splitting their
     // report history and false-alarm count across two identities.
-    const phone = `+${sender.split("@")[0]}`;
+    const phone = `+${phoneJid.split("@")[0]}`;
     console.log("Downloading audio from:", phone);
 
     const audioBuffer = await downloadMediaMessage(msg, "buffer", {}, { logger: console });

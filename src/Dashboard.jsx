@@ -1658,7 +1658,7 @@ export default function Dashboard({ alerts = [] }) {
   }, [backendAlerts]);
 
   return (
-    <div className="flex h-screen w-full flex-col overflow-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
+    <div className="flex h-screen w-full flex-col overflow-y-auto overflow-x-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 lg:overflow-hidden">
       {/* WhatsApp false-alarm notification - deliberately neutral/gray, not
           red, since this is the AI correctly filtering noise, not an
           incident needing attention. Auto-dismisses; never blocks anything
@@ -1743,9 +1743,9 @@ export default function Dashboard({ alerts = [] }) {
       </header>
 
       {/* ---------------- Body ---------------- */}
-      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+      <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:flex-row">
         {/* ---- Map viewport ---- */}
-        <div className="relative flex min-h-[360px] flex-1 overflow-hidden bg-[#050810] p-3 sm:p-6">
+        <div className="relative flex h-[55vh] min-h-[360px] shrink-0 overflow-hidden bg-[#050810] p-3 sm:p-6 lg:h-auto lg:flex-1 lg:shrink">
           <div className="relative h-full w-full overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl ring-1 ring-slate-800/60">
             <MapContainer
               center={INDIA_CENTER}
@@ -1969,7 +1969,7 @@ export default function Dashboard({ alerts = [] }) {
         </div>
 
         {/* ---- Sidebar ---- */}
-        <aside className="flex w-full shrink-0 flex-col border-t border-slate-200 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-900/50 lg:h-full lg:w-[400px] lg:border-l lg:border-t-0">
+        <aside className="flex h-[70vh] w-full shrink-0 flex-col border-t border-slate-200 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-900/50 lg:h-full lg:w-[400px] lg:border-l lg:border-t-0">
           <div className="shrink-0 space-y-3 border-b border-slate-200 dark:border-slate-800 p-3">
             <div className="relative">
               <Search size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-500" />
