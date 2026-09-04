@@ -18,6 +18,15 @@ backend/.env
 backend/__pycache__
 __pycache__
 
+# whatsapp-listener: auth_info/ holds live WhatsApp Web session credentials
+# (Baileys) - equivalent to being logged into that WhatsApp account from
+# anywhere. Never commit this, and never commit the zip either since it
+# bundles the same auth_info contents.
+whatsapp-listener/auth_info/
+whatsapp-listener/node_modules/
+whatsapp-listener/.env
+whatsapp-listener.zip
+
 # Claude Code local state - contains cached permission strings that can
 # include literal secrets from past commands (e.g. curl calls with an API
 # key inline), and is local tooling config, not project source anyway

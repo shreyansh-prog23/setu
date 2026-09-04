@@ -430,22 +430,28 @@ async def whatsapp_webhook(
         logger.error("WhatsApp voice SOS processing failed: %s", exc)
         return _twiml("Sorry, we couldn't process that voice message. Please try again or call the emergency line.")
 
-    if row.get("rejected"):
-        # Never reaches _register_alert_row/sos_alerts - doesn't create an
-        # active SOS, doesn't put a pin on the map. Logged to its own small
-        # table only so the Command Center can flash a brief "false alarm
-        # rejected" notification, and told to the sender directly too, so a
-        # real emergency mistakenly classified as unrelated is at least
-        # visible somewhere, not dropped with zero trace.
-        database.insert_rejected_voice_message(phone=From, reason=row["reason"], raw_message=row.get("raw_message"))
-        logger.info("WhatsApp voice message rejected as non-emergency from %s: %s", From, row["reason"])
+    result = _finalize_voice_sos(row, From)
+    if result.get("rejected"):
         return _twiml(
-            f"We couldn't identify this as an emergency ({row['reason']}). "
+            f"We couldn't identify this as an emergency ({result['reason']}). "
             "If you need help, please describe what's happening and your location."
         )
-
-    _register_alert_row(row)
     return _twiml(f"SOS received via voice message. {row['summary']}")
+
+
+def _finalize_voice_sos(row: dict, phone: str) -> dict:
+    """Shared by every real voice-SOS intake channel (Twilio webhook, the
+    whatsapp-listener bridge below) - NOT the dev test-upload endpoint,
+    which deliberately stays a minimal, side-effect-light path for manual
+    testing. Logs a rejection to its own table (for the Command Center's
+    "false alarm rejected" notification) or registers a real alert -
+    exactly the two things a real intake channel needs and the dev upload
+    endpoint intentionally skips."""
+    if row.get("rejected"):
+        database.insert_rejected_voice_message(phone=phone, reason=row["reason"], raw_message=row.get("raw_message"))
+        logger.info("WhatsApp voice message rejected as non-emergency from %s: %s", phone, row["reason"])
+        return row
+    return _register_alert_row(row).model_dump()
 
 
 @app.post("/api/voice-sos/upload", dependencies=[Depends(verify_api_key)])
@@ -459,6 +465,25 @@ async def voice_sos_upload(file: UploadFile = File(...), lat: Optional[float] = 
     if row.get("rejected"):
         return row
     return _register_alert_row(row)
+
+
+@app.post("/api/whatsapp-listener/voice-sos", dependencies=[Depends(verify_api_key)])
+async def whatsapp_listener_voice_sos(file: UploadFile = File(...), phone: str = Form(...)):
+    """Intake for the self-hosted whatsapp-listener (Baileys) bridge - an
+    alternative to the Twilio webhook above for whoever is running that
+    listener process. Unlike /api/voice-sos/upload (a dev-only test path
+    that hardcodes a fake identity and skips rejection logging), this uses
+    the real sender phone number end to end, exactly like the Twilio path:
+    real reported_by/contact, real driver-history tracking, real
+    false-alarm rejection notifications on the Command Center.
+
+    Deliberately a separate endpoint rather than reusing the Twilio one -
+    that one is shaped around Twilio's own webhook fields (MediaUrl0,
+    AccountSid) and fetches the audio itself from Twilio's API; this one
+    receives the audio file directly, already downloaded by the listener."""
+    audio_bytes = await file.read()
+    row = await process_voice_sos(audio_bytes, phone=phone, filename=file.filename or "sos.ogg")
+    return _finalize_voice_sos(row, phone)
 
 
 @app.post("/api/sos/{alert_id}/dispatch", response_model=Alert, dependencies=[Depends(verify_api_key)])
