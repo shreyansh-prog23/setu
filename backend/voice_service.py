@@ -26,6 +26,11 @@ logger = logging.getLogger("voice_service")
 # silently pretend precision it doesn't have.
 DEFAULT_FALLBACK_COORDS = (22.9734, 78.6569)
 
+INCIDENT_TYPES = [
+    "Landslide / Mudslide", "Earthquake", "Flood / Flash Flood", "Cyclone / Storm",
+    "Fire", "Medical Emergency", "Road Accident", "Structural Collapse", "Other",
+]
+
 TRIAGE_PROMPT = (
     "You are a disaster-response triage assistant for India. Read "
     "the transcript of an inbound WhatsApp voice message and extract a JSON "
@@ -33,15 +38,23 @@ TRIAGE_PROMPT = (
     "genuinely describes a disaster, accident, medical emergency, or someone in "
     "danger needing help; false for casual chat, greetings, test messages, "
     "wrong numbers, unrelated questions, or anything not describing a real "
-    "emergency), incident_type (short string, empty string if not an "
-    "emergency), urgency ('CRITICAL'|'HIGH'|'MODERATE', empty string if not an "
-    "emergency), spoken_location (place name mentioned in the call, or empty "
-    "string), action_needed (short string - what responders should do first, "
-    "empty string if not an emergency), summary (one sentence - if not an "
-    "emergency, briefly say what the message actually was instead). The "
-    "transcript comes from speech-to-text and may mishear place names - "
-    "normalize any phonetically garbled Indian place name to its standard "
-    "spelling before returning spoken_location. Respond with JSON only."
+    "emergency), incident_type (pick the SINGLE closest match from exactly this "
+    f"list: {', '.join(INCIDENT_TYPES)} - use 'Other' rather than guessing a "
+    "specific hazard the transcript doesn't actually support (e.g. don't say "
+    "'Fire' unless burning/smoke is actually mentioned - a flood, collapse, or "
+    "accident described in a caller's own words is a different, easily-confused "
+    "hazard and must not be relabeled as something more dramatic-sounding); "
+    "empty string if not an emergency. urgency ('CRITICAL'|'HIGH'|'MODERATE', "
+    "empty string if not an emergency), spoken_location (place name mentioned "
+    "in the call, or empty string), action_needed (short string - what "
+    "responders should do first, empty string if not an emergency), summary "
+    "(one sentence - if not an emergency, briefly say what the message "
+    "actually was instead; if it is, describe what the caller actually said "
+    "happened, not the incident_type category - don't say 'reports a fire' "
+    "unless the caller actually described fire). The transcript comes from "
+    "speech-to-text and may mishear place names - normalize any phonetically "
+    "garbled Indian place name to its standard spelling before returning "
+    "spoken_location. Respond with JSON only."
 )
 
 

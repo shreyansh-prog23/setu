@@ -236,7 +236,7 @@ function getSosCoords() {
 }
 
 async function dispatchSos(lat, lng, details = {}) {
-  const { incidentType = INSTANT_SOS_CATEGORY, severity = 'Critical', notes = '', mode = 'instant' } = details;
+  const { incidentType = INSTANT_SOS_CATEGORY, severity = 'Critical', notes = '', mode = 'instant', peopleAffected = null } = details;
   const requestOptions = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -259,6 +259,7 @@ async function dispatchSos(lat, lng, details = {}) {
       severity,
       notes,
       mode,
+      people_affected: peopleAffected,
     }),
   };
   // A real network failure (not just the manual "Zero Network" demo toggle
@@ -722,6 +723,7 @@ export default function DriverView({ onTriggerSOS }) {
   const [incidentType, setIncidentType] = useState(null);
   const [incidentSeverity, setIncidentSeverity] = useState('Critical');
   const [incidentNote, setIncidentNote] = useState('');
+  const [incidentPeopleAffected, setIncidentPeopleAffected] = useState('');
 
   const [sourceInput, setSourceInput] = useState('Guwahati');
   const [destInput, setDestInput] = useState('Silchar');
@@ -988,7 +990,7 @@ export default function DriverView({ onTriggerSOS }) {
 
   // Shared dispatch path for both Instant SOS (long-press) and the Detailed
   // Incident Report modal — both capture live GPS and POST to /api/sos.
-  const dispatchIncident = async ({ category, severity, note, source }) => {
+  const dispatchIncident = async ({ category, severity, note, source, peopleAffected }) => {
     const isOffline = !online;
     // Immediate feedback the instant the hold completes/tap registers -
     // without this, the gap between releasing the button and the real
@@ -1026,7 +1028,7 @@ export default function DriverView({ onTriggerSOS }) {
       // offlineQueue.js) instead of the report just vanishing once this
       // toast disappears - this used to be a purely local simulation with
       // no real send attempted at all.
-      dispatchSos(lat, lng, { incidentType: category, severity, notes: note, mode: source }).catch(() => {});
+      dispatchSos(lat, lng, { incidentType: category, severity, notes: note, mode: source, peopleAffected }).catch(() => {});
       setToast('SOS queued — will send automatically once signal returns');
     } else {
       // Success is shown only once the send is actually confirmed - this
@@ -1037,7 +1039,7 @@ export default function DriverView({ onTriggerSOS }) {
       // it for silent background retry instead.
       let delivered = false;
       try {
-        await dispatchSos(lat, lng, { incidentType: category, severity, notes: note, mode: source });
+        await dispatchSos(lat, lng, { incidentType: category, severity, notes: note, mode: source, peopleAffected });
         delivered = true;
       } catch (err) {
         console.warn('SOS backend dispatch failed, queued for automatic retry:', err);
@@ -1129,7 +1131,14 @@ export default function DriverView({ onTriggerSOS }) {
 
   const dispatchIncidentReport = () => {
     if (!incidentType) return;
-    dispatchIncident({ category: incidentType, severity: incidentSeverity, note: incidentNote.trim(), source: 'detailed' });
+    const peopleAffected = incidentPeopleAffected.trim() ? Number(incidentPeopleAffected.trim()) : null;
+    dispatchIncident({
+      category: incidentType,
+      severity: incidentSeverity,
+      note: incidentNote.trim(),
+      source: 'detailed',
+      peopleAffected: Number.isFinite(peopleAffected) ? peopleAffected : null,
+    });
   };
 
   // Reports a hazard with live GPS to the backend, then re-plans the current
@@ -1176,6 +1185,7 @@ export default function DriverView({ onTriggerSOS }) {
     setIncidentType(null);
     setIncidentSeverity('Critical');
     setIncidentNote('');
+    setIncidentPeopleAffected('');
   };
 
   if (!driverSession) {
@@ -1575,6 +1585,17 @@ export default function DriverView({ onTriggerSOS }) {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">People Affected / Trapped (optional)</label>
+                <input
+                  value={incidentPeopleAffected}
+                  onChange={(e) => setIncidentPeopleAffected(e.target.value.replace(/[^0-9]/g, ''))}
+                  inputMode="numeric"
+                  placeholder="e.g. 3"
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-950/70 px-3 py-2 text-[12px] text-slate-800 dark:text-slate-200 placeholder:text-slate-600 dark:placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
+                />
               </div>
 
               <div>

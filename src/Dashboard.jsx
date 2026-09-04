@@ -75,6 +75,13 @@ function timeAgo(date, now) {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
+// Actual clock time an alert came in at, not just a relative "6 min ago"
+// that keeps changing and gives no sense of when it actually happened
+// during the shift.
+function formatClockTime(date) {
+  return date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
 function playAlertPing() {
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -685,6 +692,128 @@ function RecoveryPanel({ stats, resolvedAlerts, onClose }) {
   );
 }
 
+// "View More Details" - a fuller, structured read on one SOS than either the
+// compact feed card or the small map-anchored selection card have room for:
+// verified contact, people affected (a real field now, not buried in free
+// text), and this reporter's other reports so an operator can spot a
+// pattern (repeat false alarms, or a second call from the same
+// already-critical scene) without cross-referencing anything themselves.
+function SosDetailPanel({ item, onClose, dispatch, resolvedInfo, driverHistory, pastReports, onDispatch, onResolve, isResolving, onStartResolve, onCancelResolve }) {
+  const cityName = useCityName(item.lat, item.lng);
+  const contact = item.reportedBy ? item.reportedBy.replace(/^whatsapp:/, '') : null;
+  return (
+    <div className="absolute inset-0 z-[2000] flex justify-end bg-white/70 dark:bg-slate-950/60" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="flex h-full w-full max-w-sm flex-col border-l border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 shadow-2xl">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 dark:border-slate-800 px-4 py-3">
+          <span className="flex items-center gap-1.5 text-sm font-semibold text-red-600 dark:text-red-400"><Siren size={15} /> SOS · {item.id}</span>
+          <button onClick={onClose} className="text-slate-500 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300"><X size={16} /></button>
+        </div>
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 text-xs">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <DispatchBadge dispatch={dispatch} resolved={resolvedInfo} />
+            <SosStatusBadge status={item.status} />
+            {item.category && <CategoryTag category={item.category} />}
+            {item.severity && <SeverityBadge severity={item.severity} />}
+            {item.urgency && <UrgencyBadge urgency={item.urgency} />}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-500">Contact</div>
+              <div className="mt-0.5 text-slate-900 dark:text-slate-100">{contact || 'Not available'}</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-500">People Affected</div>
+              <div className="mt-0.5 text-slate-900 dark:text-slate-100">{Number.isFinite(item.peopleAffected) ? item.peopleAffected : 'Not reported'}</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-500">Reported At</div>
+              <div className="mt-0.5 text-slate-900 dark:text-slate-100">{formatClockTime(item.timestamp)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-500">Vehicle / Mode</div>
+              <div className="mt-0.5 text-slate-900 dark:text-slate-100">{item.vehicleType || 'Unknown'}</div>
+            </div>
+          </div>
+
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-500">Location</div>
+            <div className="mt-0.5 text-slate-900 dark:text-slate-100">
+              {cityName === undefined ? 'Resolving place name…' : cityName || 'Place name unavailable'}
+            </div>
+            <div className="text-slate-500 dark:text-slate-500">{item.locationLabel || formatCoord(item.lat, item.lng)}</div>
+          </div>
+
+          {item.message && (
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-500">Details</div>
+              <p className="mt-0.5 text-slate-700 dark:text-slate-300">{item.message}</p>
+            </div>
+          )}
+
+          {item.isVoice && (item.summary || item.actionNeeded || item.transcript) && (
+            <div className="space-y-1 rounded-md border border-violet-500/30 bg-violet-500/10 p-2.5">
+              <div className="flex items-center gap-1.5">
+                <Radio size={11} className="text-violet-300" />
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-violet-300">AI Voice Triage</span>
+              </div>
+              {item.summary && <p className="text-slate-800 dark:text-slate-200">{item.summary}</p>}
+              {item.actionNeeded && <p className="text-violet-700 dark:text-violet-200"><span className="font-semibold">Action needed:</span> {item.actionNeeded}</p>}
+              <TranscriptToggle transcript={item.transcript} />
+            </div>
+          )}
+
+          <div>
+            <div className="mb-1 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-500">
+              <span>Past Reports From This Contact</span>
+              {driverHistory && <span>{driverHistory.total} total{driverHistory.falseAlarms ? ` · ${driverHistory.falseAlarms} false alarm${driverHistory.falseAlarms > 1 ? 's' : ''}` : ''}</span>}
+            </div>
+            {pastReports.length === 0 ? (
+              <p className="text-slate-500 dark:text-slate-500">No other reports from this contact.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {pastReports.map((p) => (
+                  <div key={p.id} className="rounded-md border border-slate-200 dark:border-slate-800 bg-white/60 dark:bg-slate-900/50 p-2">
+                    <div className="flex items-center justify-between">
+                      <span className={cx('font-medium', p.outcome_type === 'FALSE_ALARM' ? 'text-red-600 dark:text-red-400' : 'text-slate-800 dark:text-slate-200')}>
+                        {p.outcome_type ? (OUTCOME_CONFIG[p.outcome_type] || OUTCOME_CONFIG.OTHER).label : p.status}
+                      </span>
+                      <span className="text-slate-500 dark:text-slate-500">{formatClockTime(new Date(p.received_at))}</span>
+                    </div>
+                    <div className="text-slate-500 dark:text-slate-500">{p.cargo}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {resolvedInfo ? (
+            <div className="space-y-1 rounded-md border border-sky-500/30 bg-sky-500/10 p-2.5 text-sky-600 dark:text-sky-300">
+              <div className="flex items-center gap-1.5">
+                <CheckCircle2 size={12} />
+                {(OUTCOME_CONFIG[resolvedInfo.outcomeType] || OUTCOME_CONFIG.OTHER).label}
+              </div>
+              {resolvedInfo.outcomeNote && <div className="italic text-sky-700/90 dark:text-sky-200/80">"{resolvedInfo.outcomeNote}"</div>}
+            </div>
+          ) : dispatch ? (
+            isResolving ? (
+              <OutcomePicker onPick={onResolve} onCancel={onCancelResolve} />
+            ) : (
+              <button onClick={onStartResolve} className="flex w-full items-center justify-center gap-1.5 rounded-md border border-sky-500/40 bg-sky-500/15 py-2 text-[11px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-300 transition hover:bg-sky-500/25">
+                <CheckCircle2 size={12} /> Mark Resolved
+              </button>
+            )
+          ) : (
+            <button onClick={onDispatch} className="flex w-full items-center justify-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/15 py-2 text-[11px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-300 transition hover:bg-amber-500/25">
+              <Truck size={12} /> Acknowledge &amp; Dispatch QRT
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SeverityBadge({ severity }) {
   const cls = SEVERITY_BADGE_CONFIG[severity];
   if (!cls) return null;
@@ -724,9 +853,15 @@ function ConvoyMarker({ convoy, onSelect, active }) {
 // their own reverse-geocode call.
 const _cityNameCache = new Map();
 
+// Returns undefined while the lookup is genuinely still in flight, null once
+// it's actually finished with no name to show (failed or found nothing), or
+// the resolved "City, State" string - callers need that distinction (a
+// failed/empty lookup used to be indistinguishable from "still loading",
+// so a location the geocoder couldn't resolve showed "Resolving..." forever
+// instead of an honest fallback).
 function useCityName(lat, lng) {
   const key = `${lat.toFixed(2)},${lng.toFixed(2)}`;
-  const [name, setName] = useState(() => _cityNameCache.get(key) ?? null);
+  const [name, setName] = useState(() => _cityNameCache.get(key));
   useEffect(() => {
     if (_cityNameCache.has(key)) {
       setName(_cityNameCache.get(key));
@@ -741,7 +876,12 @@ function useCityName(lat, lng) {
         if (!cancelled) setName(resolved);
       })
       .catch(() => {
+        // Used to only update the cache here, never the component's own
+        // state - a genuine network failure left this specific mount stuck
+        // showing "still loading" forever, even though a later mount for
+        // the same coordinates would've correctly read the cached null.
         _cityNameCache.set(key, null);
+        if (!cancelled) setName(null);
       });
     return () => {
       cancelled = true;
@@ -870,7 +1010,10 @@ function MapFlyTo({ target }) {
   const map = useMap();
   useEffect(() => {
     if (!target) return;
-    map.flyTo([target.lat, target.lng], Math.max(map.getZoom(), 10), { duration: 1.25 });
+    // Was capped at 10 (a wide regional view) - raised to 15 (genuinely
+    // close, street-level-ish) since MapContainer's own maxZoom below was
+    // the real reason zooming in ever felt limited, not the tile provider.
+    map.flyTo([target.lat, target.lng], Math.max(map.getZoom(), 15), { duration: 1.25 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target?.key]);
   return null;
@@ -935,7 +1078,19 @@ export default function Dashboard({ alerts = [] }) {
       }));
     const fromBackend = backendAlerts
       .filter((a) => !known.has(`BE-${a.id}`))
-      .map((a) => ({
+      .map((a) => {
+        // Driver-app online SOS sends cargo as "{severity}: {incidentType}"
+        // (see DriverView.jsx dispatchIncident) - split it back apart so
+        // CategoryTag/SeverityBadge actually render instead of silently
+        // never showing for real SOS (they only ever got a value for
+        // simulated/offline-echo items before this). WhatsApp voice SOS
+        // instead already gets its own urgency badge from the AI triage, so
+        // cargo there is just the bare AI-derived incident type already.
+        const isWhatsapp = a.source === 'whatsapp_voice';
+        const [maybeSeverity, ...rest] = typeof a.cargo === 'string' ? a.cargo.split(': ') : [];
+        const parsedSeverity = !isWhatsapp && rest.length > 0 ? maybeSeverity : undefined;
+        const parsedCategory = !isWhatsapp && rest.length > 0 ? rest.join(': ') : a.cargo;
+        return {
         id: `BE-${a.id}`,
         kind: 'sos',
         timestamp: new Date(a.received_at),
@@ -943,6 +1098,8 @@ export default function Dashboard({ alerts = [] }) {
           a.source === 'whatsapp_voice' ? 'WhatsApp Voice SOS' : a.source === 'SMS FALLBACK ALERT' ? 'SMS Fallback Alert' : 'Live Online',
         vehicleType: a.source === 'whatsapp_voice' ? 'Voice Report' : a.source === 'SMS FALLBACK ALERT' ? 'SMS Relay' : 'Mobile Unit',
         cargoPriority: a.cargo,
+        category: parsedCategory,
+        severity: parsedSeverity,
         lat: a.lat,
         lng: a.lng,
         district: '',
@@ -961,7 +1118,9 @@ export default function Dashboard({ alerts = [] }) {
         outcomeNote: a.outcome_note,
         receivedAt: a.received_at,
         reportedBy: a.reported_by, // real, server-verified identity (driver phone / Twilio From) - used to look up this reporter's history below, not anything the client could fake
-      }));
+        peopleAffected: a.people_affected,
+        };
+      });
     return [...offlineOnly, ...fromBackend];
   }, [alerts, sosPings, backendAlerts]);
 
@@ -1040,6 +1199,8 @@ export default function Dashboard({ alerts = [] }) {
   const [dispatched, setDispatched] = useState(() => loadStoredSosHistory()?.dispatched ?? {}); // { [sosId]: { depotName, etaMin, dispatchedAt } }
   const [resolved, setResolved] = useState(() => loadStoredSosHistory()?.resolved ?? {}); // { [sosId]: { resolvedAt, outcomeType, outcomeNote } }
   const [resolvingId, setResolvingId] = useState(null); // sosId whose outcome-picker is expanded
+  const [expandedIds, setExpandedIds] = useState(() => new Set()); // sosIds currently expanded in the feed list
+  const [detailItem, setDetailItem] = useState(null); // full SOS item shown in the "View More" detail panel, or null
   const [feedTab, setFeedTab] = useState('active'); // 'active' | 'resolved'
 
   // Recovery Analytics — isolated add-on state, own polling, doesn't touch
@@ -1590,7 +1751,12 @@ export default function Dashboard({ alerts = [] }) {
               center={INDIA_CENTER}
               zoom={DEFAULT_ZOOM}
               minZoom={4}
-              maxZoom={14}
+              // Was 14 - an arbitrary cap well below what any of the 3 tile
+              // layers actually support (Standard/Satellite go well past
+              // 18, Physical's own native tiles stop at 17 but overzoom
+              // gracefully via maxNativeZoom above) - this, not the tile
+              // provider, was why zooming in ever felt limited.
+              maxZoom={18}
               maxBounds={INDIA_BOUNDS}
               maxBoundsViscosity={0.7}
               zoomControl={false}
@@ -1618,8 +1784,18 @@ export default function Dashboard({ alerts = [] }) {
                   isNew={s.id === flashId}
                   dispatch={dispatched[s.id]}
                   onSelect={(v) => {
-                    setSelected({ kind: 'sos', ...v });
-                    flyToCoordinate(v.lat, v.lng);
+                    // Clicking the already-selected SOS again zooms back out
+                    // instead of doing nothing/re-zooming to the same spot -
+                    // otherwise the only way back to the wide view was the
+                    // separate Reset control, easy to miss right after
+                    // zooming all the way into one pin.
+                    if (selected?.kind === 'sos' && selected.id === v.id) {
+                      setSelected(null);
+                      resetViewRef.current();
+                    } else {
+                      setSelected({ kind: 'sos', ...v });
+                      flyToCoordinate(v.lat, v.lng);
+                    }
                   }}
                   active={selected?.kind === 'sos' && selected.id === s.id}
                 />
@@ -1762,6 +1938,26 @@ export default function Dashboard({ alerts = [] }) {
               />
             )}
 
+            {detailItem && (
+              <SosDetailPanel
+                item={detailItem}
+                onClose={() => setDetailItem(null)}
+                dispatch={dispatched[detailItem.id]}
+                resolvedInfo={resolved[detailItem.id]}
+                driverHistory={driverHistoryByPhone[detailItem.reportedBy]}
+                pastReports={
+                  detailItem.reportedBy
+                    ? backendAlerts.filter((a) => a.reported_by === detailItem.reportedBy && `BE-${a.id}` !== detailItem.id)
+                    : []
+                }
+                onDispatch={() => dispatchQrt(detailItem)}
+                onResolve={(type, note) => resolveSos(detailItem, type, note)}
+                isResolving={resolvingId === detailItem.id}
+                onStartResolve={() => setResolvingId(detailItem.id)}
+                onCancelResolve={() => setResolvingId(null)}
+              />
+            )}
+
             {recoveryOpen && (
               <RecoveryPanel
                 stats={combinedRecoveryStats}
@@ -1826,11 +2022,31 @@ export default function Dashboard({ alerts = [] }) {
               </div>
             )}
 
-            {feed.map((item) =>
-              item.kind === 'sos' ? (
+            {feed.map((item) => {
+              const isExpanded = expandedIds.has(item.id);
+              return item.kind === 'sos' ? (
                 <div
                   key={item.id}
-                  onClick={() => setSelected({ kind: 'sos', ...item })}
+                  onClick={() => {
+                    const collapsing = isExpanded;
+                    setExpandedIds((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(item.id)) next.delete(item.id);
+                      else next.add(item.id);
+                      return next;
+                    });
+                    // Collapsing an already-expanded card zooms back out
+                    // (same as clicking an already-selected marker again) -
+                    // expanding/collapsing already mirrors zoom in/out, so
+                    // it reads as one consistent gesture either way.
+                    if (collapsing) {
+                      setSelected(null);
+                      resetViewRef.current();
+                    } else {
+                      setSelected({ kind: 'sos', ...item });
+                      if (Number.isFinite(item.lat) && Number.isFinite(item.lng)) flyToCoordinate(item.lat, item.lng);
+                    }
+                  }}
                   className={cx(
                     'cursor-pointer rounded-lg border p-3 transition',
                     item.id === flashId ? 'border-red-500 bg-red-500/10 animate-pulse' : 'border-slate-200 dark:border-slate-800 bg-white/60 dark:bg-slate-950/50 hover:border-slate-300 dark:hover:border-slate-700'
@@ -1840,7 +2056,10 @@ export default function Dashboard({ alerts = [] }) {
                     <span className="flex items-center gap-1.5 text-xs font-semibold text-red-600 dark:text-red-400">
                       <Siren size={13} /> SOS · {item.id}
                     </span>
-                    <span className="text-[10px] text-slate-500 dark:text-slate-500">{item.timeLabel || timeAgo(item.timestamp, now)}</span>
+                    <span className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-500" title={item.timeLabel || timeAgo(item.timestamp, now)}>
+                      {formatClockTime(item.timestamp)}
+                      <ChevronRight size={12} className={cx('transition-transform', isExpanded && 'rotate-90')} />
+                    </span>
                   </div>
                   <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
                     <DispatchBadge dispatch={dispatched[item.id]} resolved={resolved[item.id]} />
@@ -1852,23 +2071,33 @@ export default function Dashboard({ alerts = [] }) {
                   <div className="space-y-0.5 text-[11px] text-slate-600 dark:text-slate-300">
                     <div className="text-slate-900 dark:text-slate-100 font-medium">{item.cargoPriority}</div>
                     <div>{item.vehicleType} · {item.district}{item.state ? `, ${item.state}` : ''}</div>
-                    <div className="text-slate-500 dark:text-slate-500">{item.locationLabel || formatCoord(item.lat, item.lng)}</div>
                   </div>
-                  <p className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400">{item.message}</p>
-                  {item.note && <p className="mt-1 text-[11px] italic text-slate-500 dark:text-slate-400">"{item.note}"</p>}
-                  {item.isVoice && (
-                    <div className="mt-1.5 space-y-1 rounded-md border border-violet-500/30 bg-violet-500/10 p-2">
-                      <div className="flex items-center gap-1.5">
-                        <Radio size={11} className="text-violet-300" />
-                        <span className="text-[10px] font-semibold uppercase tracking-wide text-violet-300">AI Voice Triage</span>
-                        {item.urgency && <UrgencyBadge urgency={item.urgency} />}
-                      </div>
-                      {item.summary && <p className="text-[11px] text-slate-800 dark:text-slate-200">{item.summary}</p>}
-                      {item.actionNeeded && (
-                        <p className="text-[11px] text-violet-200"><span className="font-semibold">Action needed:</span> {item.actionNeeded}</p>
+                  {isExpanded && (
+                    <>
+                      <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-500">{item.locationLabel || formatCoord(item.lat, item.lng)}</div>
+                      <p className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400">{item.message}</p>
+                      {item.note && <p className="mt-1 text-[11px] italic text-slate-500 dark:text-slate-400">"{item.note}"</p>}
+                      {item.isVoice && (
+                        <div className="mt-1.5 space-y-1 rounded-md border border-violet-500/30 bg-violet-500/10 p-2">
+                          <div className="flex items-center gap-1.5">
+                            <Radio size={11} className="text-violet-300" />
+                            <span className="text-[10px] font-semibold uppercase tracking-wide text-violet-300">AI Voice Triage</span>
+                            {item.urgency && <UrgencyBadge urgency={item.urgency} />}
+                          </div>
+                          {item.summary && <p className="text-[11px] text-slate-800 dark:text-slate-200">{item.summary}</p>}
+                          {item.actionNeeded && (
+                            <p className="text-[11px] text-violet-200"><span className="font-semibold">Action needed:</span> {item.actionNeeded}</p>
+                          )}
+                          <TranscriptToggle transcript={item.transcript} />
+                        </div>
                       )}
-                      <TranscriptToggle transcript={item.transcript} />
-                    </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setDetailItem(item); }}
+                        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-slate-300 dark:border-slate-700 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 transition hover:bg-slate-100 dark:hover:bg-slate-800"
+                      >
+                        <ChevronRight size={12} /> View More Details
+                      </button>
+                    </>
                   )}
                   {resolved[item.id] ? (
                     <div className="mt-2 space-y-1 rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-1.5 text-[11px] text-sky-600 dark:text-sky-300">
@@ -1925,8 +2154,8 @@ export default function Dashboard({ alerts = [] }) {
                   <div className="text-[11px] text-slate-500 dark:text-slate-400">{item.route} · {item.district}, {item.state}</div>
                   <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{item.message}</p>
                 </div>
-              )
-            )}
+              );
+            })}
           </div>
 
           <div className="flex shrink-0 items-center justify-between border-t border-slate-200 dark:border-slate-800 px-3 py-2 text-[10px] text-slate-500 dark:text-slate-500">

@@ -111,6 +111,7 @@ class Alert(BaseModel):
     resolved_at: Optional[str] = None
     outcome_type: Optional[str] = None
     outcome_note: Optional[str] = None
+    people_affected: Optional[int] = None
 
 
 class HazardReport(BaseModel):
@@ -167,6 +168,15 @@ class SOSReport(BaseModel):
     timestamp: str
     priority: str = Field(..., description="Cargo/aid priority, e.g. 'Emergency Medical Supplies'")
     status: str = Field(default="DISPATCH_TRIGGERED")
+    # The frontend (DriverView.jsx dispatchSos) has always sent these three,
+    # but they weren't declared here - Pydantic silently drops undeclared
+    # fields, so a driver's typed description ("3 people trapped...") never
+    # actually reached the database. Declared now so create_sos below can
+    # actually use them.
+    incident_type: Optional[str] = None
+    severity: Optional[str] = None
+    notes: Optional[str] = None
+    people_affected: Optional[int] = None
 
 
 class DriverLoginStartRequest(BaseModel):
@@ -198,6 +208,7 @@ def _alert_from_row(row: dict) -> Alert:
         status=row.get("status") or "PENDING",
         dispatched_at=row.get("dispatched_at"), resolved_at=row.get("resolved_at"),
         outcome_type=row.get("outcome_type"), outcome_note=row.get("outcome_note"),
+        people_affected=row.get("people_affected"),
     )
 
 
@@ -218,10 +229,12 @@ def _register_alert_row(row: dict) -> Alert:
 
 
 def _make_alert(lat: float, lng: float, cargo: str, reason: str, source: str,
-                 raw_message: Optional[str] = None, reported_by: Optional[str] = None) -> Alert:
+                 raw_message: Optional[str] = None, reported_by: Optional[str] = None,
+                 people_affected: Optional[int] = None) -> Alert:
     row = database.insert_sos_alert(
         truck_id=reported_by, latitude=lat, longitude=lng, cargo=cargo, reason=reason,
         source=source, raw_message=raw_message, reported_by=reported_by,
+        people_affected=people_affected,
     )
     return _register_alert_row(row)
 
@@ -328,13 +341,18 @@ async def get_rejected_voice_messages():
 
 @app.post("/api/sos", response_model=Alert, dependencies=[Depends(verify_api_key)])
 async def create_sos(report: SOSReport, driver_phone: str = Depends(verify_driver_session)):
+    # reason used to always be report.status, which is the fixed literal
+    # "DISPATCH_TRIGGERED" - every online SOS showed that same useless
+    # string as its description on the Command Center instead of whatever
+    # the driver actually typed (e.g. "3 people trapped, need rescue").
     return _make_alert(
         lat=report.latitude,
         lng=report.longitude,
         cargo=report.priority,
-        reason=report.status,
+        reason=report.notes or "No additional details provided.",
         source="ONLINE SOS REPORT",
         reported_by=driver_phone,
+        people_affected=report.people_affected,
     )
 
 

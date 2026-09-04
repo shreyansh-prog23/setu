@@ -110,6 +110,9 @@ def init_db() -> None:
         for col in ("dispatched_at", "resolved_at", "outcome_type", "outcome_note"):
             if col not in existing_sos_cols:
                 conn.execute(f"ALTER TABLE sos_alerts ADD COLUMN {col} TEXT")
+        # Migrate a DB created before the driver-reported people-affected count existed.
+        if "people_affected" not in existing_sos_cols:
+            conn.execute("ALTER TABLE sos_alerts ADD COLUMN people_affected INTEGER")
         # Non-emergency WhatsApp voice messages the AI triage step rejects -
         # never becomes an sos_alerts row (so it can't show up as an active
         # SOS/on the map), kept here only so the Command Center can surface a
@@ -240,6 +243,7 @@ def insert_sos_alert(
     urgency: Optional[str] = None,
     action_needed: Optional[str] = None,
     summary: Optional[str] = None,
+    people_affected: Optional[int] = None,
 ) -> dict:
     duplicate = find_recent_duplicate_sos(reported_by, latitude, longitude)
     if duplicate is not None:
@@ -248,15 +252,16 @@ def insert_sos_alert(
     received_at = datetime.now(timezone.utc).isoformat()
     with _connect() as conn:
         cur = conn.execute(
-            """INSERT INTO sos_alerts (truck_id, latitude, longitude, cargo, reason, source, raw_message, reported_by, received_at, urgency, action_needed, summary)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (truck_id, latitude, longitude, cargo, reason, source, raw_message, reported_by, received_at, urgency, action_needed, summary),
+            """INSERT INTO sos_alerts (truck_id, latitude, longitude, cargo, reason, source, raw_message, reported_by, received_at, urgency, action_needed, summary, people_affected)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (truck_id, latitude, longitude, cargo, reason, source, raw_message, reported_by, received_at, urgency, action_needed, summary, people_affected),
         )
         return {
             "id": cur.lastrowid, "truck_id": truck_id, "latitude": latitude, "longitude": longitude,
             "cargo": cargo, "reason": reason, "source": source, "raw_message": raw_message,
             "reported_by": reported_by, "received_at": received_at,
             "urgency": urgency, "action_needed": action_needed, "summary": summary,
+            "people_affected": people_affected,
         }
 
 
