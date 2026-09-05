@@ -1144,6 +1144,20 @@ export default function Dashboard({ alerts = [] }) {
 
   const [search, setSearch] = useState('');
   const [stateFilter, setStateFilter] = useState('All');
+  const [statesExpanded, setStatesExpanded] = useState(false);
+  // Was every one of the 18 pan-India states shown as a chip at once - a
+  // wall of buttons before you've even reached the actual alert feed below.
+  // Collapsed to a handful by default, with a toggle for the rest - the
+  // currently active filter always stays visible even when collapsed, so
+  // picking a hidden state and closing the list back up doesn't make your
+  // own selection disappear.
+  const DEFAULT_VISIBLE_STATE_COUNT = 6;
+  const visibleStates = useMemo(() => {
+    if (statesExpanded) return STATE_LIST;
+    const base = STATE_LIST.slice(0, DEFAULT_VISIBLE_STATE_COUNT);
+    return base.includes(stateFilter) ? base : [...base, stateFilter];
+  }, [statesExpanded, stateFilter]);
+  const hiddenStateCount = STATE_LIST.length - visibleStates.length;
   const [selected, setSelected] = useState(null);
   const [flyTarget, setFlyTarget] = useState(null); // {lat, lng, key} — flyTo target for the live map
   const [layers, setLayers] = useState({ convoys: true, sos: true, routes: true, hazards: true });
@@ -1981,7 +1995,7 @@ export default function Dashboard({ alerts = [] }) {
               />
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {STATE_LIST.map((s) => (
+              {visibleStates.map((s) => (
                 <button
                   key={s}
                   onClick={() => setStateFilter(s)}
@@ -1993,6 +2007,15 @@ export default function Dashboard({ alerts = [] }) {
                   {s}
                 </button>
               ))}
+              {(hiddenStateCount > 0 || statesExpanded) && (
+                <button
+                  onClick={() => setStatesExpanded((v) => !v)}
+                  className="flex items-center gap-1 rounded-full border border-dashed border-slate-300 dark:border-slate-700 px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 transition hover:border-slate-400 dark:hover:border-slate-600 hover:text-slate-700 dark:hover:text-slate-200"
+                >
+                  {statesExpanded ? 'Show less' : `+${hiddenStateCount} more`}
+                  <ChevronRight size={11} className={cx('transition-transform', statesExpanded && '-rotate-90', !statesExpanded && 'rotate-90')} />
+                </button>
+              )}
             </div>
           </div>
 
