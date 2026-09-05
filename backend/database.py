@@ -256,7 +256,36 @@ def insert_sos_alert(
 ) -> dict:
     duplicate = find_recent_duplicate_sos(reported_by, latitude, longitude)
     if duplicate is not None:
-        return duplicate
+        # Used to just return the existing row completely unchanged - a very
+        # real, common flow (hold the instant-SOS button in a panic, then
+        # immediately open the detailed incident form to add what's
+        # actually happening) silently discarded the second, more
+        # informative submission's category/severity/notes/people_affected
+        # entirely, while the app still told the driver "dispatched" since
+        # a real 200 came back. The dedup's job is "don't create a second
+        # pin for the same incident," not "throw away whatever the driver
+        # tries to add after the first tap" - so it now updates the
+        # existing alert with the newer submission's details instead.
+        # Optional fields fall back to whatever was already there if this
+        # particular submission didn't provide them, so a later report that
+        # doesn't repeat a detail (e.g. doesn't restate people_affected)
+        # can't blank out information an earlier one already gave.
+        updated_people_affected = people_affected if people_affected is not None else duplicate.get("people_affected")
+        updated_urgency = urgency if urgency is not None else duplicate.get("urgency")
+        updated_action_needed = action_needed if action_needed is not None else duplicate.get("action_needed")
+        updated_summary = summary if summary is not None else duplicate.get("summary")
+        updated_raw_message = raw_message if raw_message is not None else duplicate.get("raw_message")
+        with _connect() as conn:
+            conn.execute(
+                """UPDATE sos_alerts
+                   SET cargo = ?, reason = ?, urgency = ?, action_needed = ?, summary = ?,
+                       raw_message = ?, people_affected = ?
+                   WHERE id = ?""",
+                (cargo, reason, updated_urgency, updated_action_needed, updated_summary,
+                 updated_raw_message, updated_people_affected, duplicate["id"]),
+            )
+            row = conn.execute("SELECT * FROM sos_alerts WHERE id = ?", (duplicate["id"],)).fetchone()
+            return dict(row)
 
     received_at = datetime.now(timezone.utc).isoformat()
     with _connect() as conn:
