@@ -140,24 +140,53 @@ function lineHitsHazard(a, b) {
   return false;
 }
 
+// Render's free-tier backend can take 20-30s+ to answer the first request
+// after an idle cold start - without a hard cap here, that request would
+// just hang forever with the fetch never resolving either way, and the
+// dropdown would silently stay empty with no sign anything was happening.
+const GEOCODE_TIMEOUT_MS = 20000;
+
 // Debounced real place-name search against the backend's geocoder (see
 // backend/geocoding.py) - replaces matching free-text against a fixed hub
 // list, so a driver can search any real place in India, not just the chips.
+// Returns a status alongside the suggestions so the field can show
+// "Searching..." / a retry hint instead of just doing nothing on a slow or
+// failed request (which is exactly what "suggestions never show up" looks
+// like from the outside).
 function useGeocodeSuggestions(query) {
   const [suggestions, setSuggestions] = useState([]);
+  const [status, setStatus] = useState('idle'); // 'idle' | 'loading' | 'error'
   useEffect(() => {
     const q = query.trim();
     if (q.length < 3) {
       setSuggestions([]);
+      setStatus('idle');
       return;
     }
     const controller = new AbortController();
+    let timedOut = false;
     const timer = setTimeout(async () => {
+      setStatus('loading');
+      const hardTimeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, GEOCODE_TIMEOUT_MS);
       try {
         const res = await apiFetch(`/api/geocode/search?q=${encodeURIComponent(q)}`, { signal: controller.signal });
-        if (res.ok) setSuggestions(await res.json());
+        if (res.ok) {
+          setSuggestions(await res.json());
+          setStatus('idle');
+        } else {
+          setStatus('error');
+        }
       } catch (e) {
-        // Aborted (user kept typing) or offline - just leave suggestions as-is
+        // A plain abort (not our own timeout) just means a newer keystroke
+        // superseded this request, or the component unmounted - not a real
+        // error, so stay quiet rather than flashing an error on every keystroke.
+        if (e.name === 'AbortError' && !timedOut) return;
+        setStatus('error');
+      } finally {
+        clearTimeout(hardTimeout);
       }
     }, 350);
     return () => {
@@ -165,7 +194,7 @@ function useGeocodeSuggestions(query) {
       controller.abort();
     };
   }, [query]);
-  return suggestions;
+  return { suggestions, status };
 }
 
 // A submitted place that was never explicitly clicked from the suggestion
@@ -290,7 +319,13 @@ async function dispatchSos(lat, lng, details = {}) {
 // route can't be meaningfully computed without connectivity anyway, so this
 // just surfaces the hazard flag honestly rather than inventing one waypoint
 // that only ever made sense for a single NE corridor.
-function computeCachedRoute(src, dest) {
+// `reason` distinguishes an intentional offline mode from a live request
+// that actually failed/timed out - the two look identical from the data
+// alone (no aiSafetyScore either way), but a driver seeing "unavailable
+// (offline mode)" while their phone shows full signal is exactly the kind
+// of silent, misleading failure that made this bug hard to tell apart from
+// "nothing is happening at all".
+function computeCachedRoute(src, dest, reason = 'offline') {
   const straightKm = haversineKm(src.lat, src.lng, dest.lat, dest.lng);
   const distanceKm = straightKm * ROAD_WINDING_FACTOR;
   const durationHrs = distanceKm / AVG_OFFLINE_SPEED_KMH;
@@ -298,6 +333,7 @@ function computeCachedRoute(src, dest) {
 
   return {
     source: 'cached',
+    reason,
     primary: { distanceKm, durationHrs, hazard },
     recommended: null,
   };
@@ -339,13 +375,19 @@ function HazardBreakdownRow({ hazardKey, data }) {
   );
 }
 
-function AiCorridorRiskCard({ safetyScore, riskLevel, riskFactors, hazardBreakdown }) {
+const DEGRADED_MESSAGES = {
+  offline: 'AI Corridor Risk Assessment unavailable (offline mode)',
+  timeout: 'Live risk scoring timed out — the server may be waking up from idle. Tap Plan Route again in a moment.',
+  error: "Couldn't reach live risk scoring right now. Tap Plan Route again.",
+};
+
+function AiCorridorRiskCard({ safetyScore, riskLevel, riskFactors, hazardBreakdown, degradedReason }) {
   const [expanded, setExpanded] = useState(false);
   const tone = riskTone(riskLevel);
   if (!tone) {
     return (
       <div className="rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800/40 p-2.5 text-[11px] text-slate-500 dark:text-slate-500">
-        AI Corridor Risk Assessment unavailable (offline mode)
+        {DEGRADED_MESSAGES[degradedReason] || DEGRADED_MESSAGES.offline}
       </div>
     );
   }
@@ -587,9 +629,11 @@ function DriverLoginGate({ onLoggedIn, notice }) {
   );
 }
 
-function LocationField({ label, value, onChange, onSubmit, onChip, activeName, suggestions, onSelectSuggestion }) {
+function LocationField({ label, value, onChange, onSubmit, onChip, activeName, suggestions, suggestStatus, onSelectSuggestion }) {
   const [focused, setFocused] = useState(false);
   const showSuggestions = focused && suggestions.length > 0;
+  const showLoading = focused && suggestions.length === 0 && suggestStatus === 'loading';
+  const showError = focused && suggestions.length === 0 && suggestStatus === 'error';
 
   return (
     <div className="relative">
@@ -627,6 +671,16 @@ function LocationField({ label, value, onChange, onSubmit, onChip, activeName, s
               {s.name}
             </button>
           ))}
+        </div>
+      )}
+      {showLoading && (
+        <div className="absolute inset-x-0 top-full z-20 mt-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-[11px] text-slate-500 dark:text-slate-500 shadow-xl">
+          Searching… (may take a moment if the server just woke up)
+        </div>
+      )}
+      {showError && (
+        <div className="absolute inset-x-0 top-full z-20 mt-1 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-700 dark:text-amber-300 shadow-xl">
+          Couldn't load suggestions — check your connection and keep typing to retry.
         </div>
       )}
       <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -733,8 +787,8 @@ export default function DriverView({ onTriggerSOS }) {
   // re-parse the text later.
   const [sourceCoords, setSourceCoords] = useState({ lat: 26.1445, lng: 91.7362, name: 'Guwahati' });
   const [destCoords, setDestCoords] = useState({ lat: 24.8333, lng: 92.7789, name: 'Silchar' });
-  const sourceSuggestions = useGeocodeSuggestions(sourceInput);
-  const destSuggestions = useGeocodeSuggestions(destInput);
+  const { suggestions: sourceSuggestions, status: sourceSuggestStatus } = useGeocodeSuggestions(sourceInput);
+  const { suggestions: destSuggestions, status: destSuggestStatus } = useGeocodeSuggestions(destInput);
   const [routeResult, setRouteResult] = useState(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState(null);
@@ -867,7 +921,7 @@ export default function DriverView({ onTriggerSOS }) {
     if (plannerAbortRef.current) plannerAbortRef.current.abort();
 
     if (offline) {
-      setRouteResult(computeCachedRoute(src, dest));
+      setRouteResult(computeCachedRoute(src, dest, 'offline'));
       setRouteLoading(false);
       return;
     }
@@ -903,9 +957,11 @@ export default function DriverView({ onTriggerSOS }) {
         setRouteResult({ source: 'live', primary, recommended: null, rerouted, coordinates });
       }
     } catch (e) {
-      // Network failure or timeout: degrade gracefully to a local offline estimate
+      // Network failure or timeout: degrade gracefully to a local offline estimate,
+      // but keep the real reason so the UI can tell "actually offline" apart from
+      // "the live request timed out/failed" instead of showing the same message either way.
       if (token === plannerTokenRef.current) {
-        setRouteResult(computeCachedRoute(src, dest));
+        setRouteResult(computeCachedRoute(src, dest, e.name === 'AbortError' ? 'timeout' : 'error'));
       }
     } finally {
       clearTimeout(timeoutId);
@@ -1252,6 +1308,7 @@ export default function DriverView({ onTriggerSOS }) {
             onChip={selectSourceHub}
             activeName={sourceCoords?.name}
             suggestions={sourceSuggestions}
+            suggestStatus={sourceSuggestStatus}
             onSelectSuggestion={selectSourcePlace}
           />
           <div className="flex justify-center">
@@ -1265,6 +1322,7 @@ export default function DriverView({ onTriggerSOS }) {
             onChip={selectDestHub}
             activeName={destCoords?.name}
             suggestions={destSuggestions}
+            suggestStatus={destSuggestStatus}
             onSelectSuggestion={selectDestPlace}
           />
 
@@ -1315,6 +1373,7 @@ export default function DriverView({ onTriggerSOS }) {
                 riskLevel={routeResult.primary.aiRiskLevel}
                 riskFactors={routeResult.primary.riskFactors}
                 hazardBreakdown={routeResult.primary.hazardBreakdown}
+                degradedReason={routeResult.reason}
               />
 
               {routeResult.primary.elevationProfile && (
