@@ -41,6 +41,9 @@ const HAZARD_ZONES = [];
 
 const ROUTE_TIMEOUT_MS = 40000; // real call scores 3 TomTom candidates x live rainfall+elevation each - measured ~9-10s on local dev, but the deployed Render backend measured ~25s for a real long-distance route (Delhi-Chennai) - cross-region network latency to TomTom/Open-Meteo from Render's servers, not a bug - 18s (the old value, tuned only against local timing) was silently falling back to the offline estimate on every real deployed request for any non-trivial distance
 const GEOLOCATION_TIMEOUT_MS = 8000;
+const GEOLOCATION_FALLBACK_TIMEOUT_MS = 15000; // network positioning is slower than GPS but usually the only thing that resolves on a desktop
+const GEOLOCATION_MAX_CACHE_AGE_MS = 120000; // a 2-minute-old fix beats no fix in an emergency
+const COARSE_FIX_THRESHOLD_M = 2000; // beyond this the fix is network-positioned, not GPS - worth flagging rather than drawing as a precise pin
 const AVG_OFFLINE_SPEED_KMH = 42; // used for offline cached ETA estimates
 const ROAD_WINDING_FACTOR = 1.35; // straight-line -> approximate hill-road distance
 
@@ -239,28 +242,42 @@ async function fetchTomTomRoute(src, dest, signal) {
   return res.json(); // GeoJSON Feature<LineString>
 }
 
-// India's geographic centroid - used ONLY as an honest "we couldn't get your
-// real location" fallback (denied/unsupported/timed out), never a specific
-// place name implying false precision. Pan-India now, so there's no single
-// region to assume a driver is in if GPS fails.
-const LOCATION_UNAVAILABLE = { lat: 22.9734, lng: 78.6569, anchorLabel: 'Location unavailable' };
-
-// Live device GPS for SOS dispatch - used as-is, anywhere in India.
-function getSosCoords() {
+function requestPosition(options) {
   return new Promise((resolve) => {
-    if (!navigator.geolocation) {
-      console.warn('SOS: geolocation unsupported on this device.');
-      resolve(LOCATION_UNAVAILABLE);
-      return;
-    }
     navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracyM: pos.coords.accuracy }),
       (err) => {
-        console.warn(`SOS: geolocation failed (${err.message}).`);
-        resolve(LOCATION_UNAVAILABLE);
+        console.warn(`SOS: geolocation attempt failed (${err.message}).`);
+        resolve(null);
       },
-      { enableHighAccuracy: true, timeout: GEOLOCATION_TIMEOUT_MS }
+      options
     );
+  });
+}
+
+// Two attempts, not one. enableHighAccuracy asks for a GPS-grade fix, which a
+// laptop with no GPS chip frequently can't produce at all - a single
+// high-accuracy attempt just times out there. The retry drops to network
+// positioning (WiFi/IP) and accepts a recent cached fix: coarser, but a real
+// position rather than no position.
+//
+// Returns null when location genuinely can't be determined. It used to return
+// India's geographic centroid instead, which the Command Center then
+// reverse-geocoded and displayed as a confident, specific, wrong place -
+// an SOS sent from Kurukshetra showed up as Gadarwara, Madhya Pradesh, ~800km
+// away, indistinguishable from a real fix. Sending rescuers to a fabricated
+// location is worse than admitting the location is unknown.
+async function getSosCoords() {
+  if (!navigator.geolocation) {
+    console.warn('SOS: geolocation unsupported on this device.');
+    return null;
+  }
+  const precise = await requestPosition({ enableHighAccuracy: true, timeout: GEOLOCATION_TIMEOUT_MS });
+  if (precise) return precise;
+  return requestPosition({
+    enableHighAccuracy: false,
+    timeout: GEOLOCATION_FALLBACK_TIMEOUT_MS,
+    maximumAge: GEOLOCATION_MAX_CACHE_AGE_MS,
   });
 }
 
@@ -918,7 +935,21 @@ export default function DriverView({ onTriggerSOS }) {
     // meantime.
     setActiveModal(isOffline ? 'sos-offline' : 'sos-sending');
 
-    const { lat, lng, anchorLabel } = await getSosCoords();
+    const fix = await getSosCoords();
+    // No fabricated coordinate here - a wrong position is worse than a known
+    // missing one, because responders act on it. The driver gets told straight
+    // away so they can grant location access and retry, or call it in.
+    if (!fix) {
+      setActiveModal('sos-no-location');
+      return;
+    }
+    const { lat, lng, accuracyM } = fix;
+    // A network-positioned fix can be kilometres wide. Saying so beats
+    // rendering it as a precise pin the Command Center has no reason to doubt.
+    const fixLabel =
+      accuracyM != null && accuracyM > COARSE_FIX_THRESHOLD_M
+        ? `Approximate location (±${Math.round(accuracyM / 1000)}km)`
+        : null;
     setLastDispatch({ lat, lng, category, severity, note });
 
     if (isOffline) {
@@ -934,7 +965,7 @@ export default function DriverView({ onTriggerSOS }) {
         vehicle: 'Ambulance',
         lat,
         lng,
-        locationName: anchorLabel,
+        locationName: fixLabel,
         location: `${lat.toFixed(4)}° N, ${lng.toFixed(4)}° E`,
         description: note || `${category} — SMS fallback relay, no cellular network.`,
         time: 'Just now',
@@ -972,7 +1003,7 @@ export default function DriverView({ onTriggerSOS }) {
         vehicle: 'Ambulance',
         lat,
         lng,
-        locationName: anchorLabel || 'Live GPS Distress Beacon',
+        locationName: fixLabel || 'Live GPS Distress Beacon',
         location: `${lat.toFixed(4)}° N, ${lng.toFixed(4)}° E`,
         description:
           source === 'instant'
@@ -1400,6 +1431,32 @@ export default function DriverView({ onTriggerSOS }) {
                 className="w-full rounded-lg bg-amber-600 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-500"
               >
                 Acknowledge
+              </button>
+            </div>
+          </Modal>
+        )}
+
+        {activeModal === 'sos-no-location' && (
+          <Modal onClose={closeModal}>
+            <div className="space-y-3 text-center">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-500/15">
+                <MapPin size={26} className="text-red-600 dark:text-red-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">Location Unavailable — SOS Not Sent</h3>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Your device wouldn't give a position, so nothing was sent. Guessing a location would send responders to the
+                  wrong place.
+                </p>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                  Allow location access for this site and try again. If it still fails, call the emergency line directly.
+                </p>
+              </div>
+              <button
+                onClick={closeModal}
+                className="w-full rounded-lg bg-red-600 py-2.5 text-sm font-semibold text-white transition hover:bg-red-500"
+              >
+                Close
               </button>
             </div>
           </Modal>
