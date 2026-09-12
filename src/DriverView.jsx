@@ -806,6 +806,10 @@ export default function DriverView({ onTriggerSOS }) {
   const [routeResult, setRouteResult] = useState(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState(null);
+  // Closed by default - SOS is this screen's whole reason to exist, and route
+  // planning is a secondary convenience underneath it, not something that
+  // should compete with the emergency button for space and attention.
+  const [journeyOpen, setJourneyOpen] = useState(false);
 
   const holdStartRef = useRef(null);
   const rafRef = useRef(null);
@@ -1245,7 +1249,7 @@ export default function DriverView({ onTriggerSOS }) {
           <div className="flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-1.5 text-slate-900 dark:text-slate-100">
               <Truck size={16} className="shrink-0 text-sky-600 dark:text-sky-400" />
-              <span className="truncate text-sm font-bold tracking-wide">Driver Mobile View</span>
+              <span className="truncate text-sm font-bold tracking-wide">Citizen Helpdesk</span>
             </div>
           </div>
 
@@ -1315,8 +1319,24 @@ export default function DriverView({ onTriggerSOS }) {
             />
           </div>
         </section>
-        {/* Navigation card */}
-        <section className="mx-4 mt-4 shrink-0 space-y-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-900/60 p-3.5">
+        {/* Navigation card - collapsed by default so it stays a secondary
+            convenience under the SOS button, not competing with it. */}
+        <section className="mx-4 mt-4 shrink-0 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-900/60">
+          <button
+            onClick={() => setJourneyOpen((o) => !o)}
+            className="flex w-full items-center justify-between gap-2 p-3.5 text-left"
+          >
+            <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-200">
+              <Navigation size={15} className="text-sky-600 dark:text-sky-400" />
+              Want to plan your journey?
+            </span>
+            <ChevronDown
+              size={16}
+              className={cx('shrink-0 text-slate-500 dark:text-slate-500 transition-transform', journeyOpen && 'rotate-180')}
+            />
+          </button>
+          {journeyOpen && (
+        <div className="space-y-3 px-3.5 pb-3.5">
           <LocationField
             label="Origin"
             value={sourceInput}
@@ -1415,6 +1435,8 @@ export default function DriverView({ onTriggerSOS }) {
             </>
             );
           })()}
+        </div>
+          )}
         </section>
         {/* Ground reporting */}
         <div className="shrink-0 border-t border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-900/60 p-4">

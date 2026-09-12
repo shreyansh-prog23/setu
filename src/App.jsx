@@ -131,7 +131,7 @@ function OperatorLoginGate({ onLoggedIn }) {
 
 const TABS = [
   { id: 'dashboard', label: '🖥️ Government Command Center' },
-  { id: 'driver', label: '📱 Driver Mobile View' },
+  { id: 'driver', label: '📱 Citizen Helpdesk' },
 ];
 
 const THEME_STORAGE_KEY = 'setu_theme';
