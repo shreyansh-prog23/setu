@@ -192,8 +192,17 @@ export default function App() {
     setAlerts((prev) => [newAlert, ...prev]);
   };
 
+  // h-screen (an explicit, definite height), not min-h-screen: the aside's
+  // own lg:h-full several levels down needs SOME ancestor in this chain to
+  // have a definite (not min-/content-based) height for percentage-height
+  // resolution to work at all - without one, every h-full/flex-1 min-h-0
+  // pairing further down stays ambiguous and silently fails to clip, which
+  // is what let Dashboard's alert feed grow to fit all its content instead
+  // of scrolling in place. No overflow-hidden added here, so Driver View's
+  // centered phone card can still overflow the page and be scrolled to on a
+  // short screen exactly as before.
   return (
-    <div className="flex min-h-screen flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-white">
+    <div className="flex h-screen flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-white">
       <nav className="sticky top-0 z-50 flex shrink-0 items-center justify-center gap-3 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/80 px-4 py-3 backdrop-blur">
         <div className="flex items-center gap-1 rounded-full border border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-950/60 p-1">
           {TABS.map((tab) => (
@@ -229,7 +238,18 @@ export default function App() {
         </button>
       </nav>
 
-      <div className="flex-1">
+      {/* Dashboard demanded a full extra 100vh (h-screen) on top of whatever
+          the nav above it already used, forcing the whole page ~71px taller
+          than one screen - which produced a second, page-level scrollbar
+          sitting right next to the alert feed's own scrollbar, reading as one
+          broken/merged scrollbar. flex-col + min-h-0 + overflow-hidden here
+          gives Dashboard a real flex-item height to fill (flex-1 min-h-0 on
+          its own root) instead of a raw 100vh it can't actually have.
+          Scoped to the dashboard view only - Driver View's centered phone
+          card deliberately relies on the page being free to grow/scroll on
+          short screens, and forcing the same hard clip here would cut off
+          the bottom of that card with no way to reach it. */}
+      <div className={cx('flex-1', view === 'dashboard' && 'flex min-h-0 flex-col overflow-hidden')}>
         {view === 'dashboard' ? (
           operatorSession ? (
             <Dashboard alerts={alerts} />

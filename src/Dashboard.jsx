@@ -1753,7 +1753,7 @@ export default function Dashboard({ alerts = [] }) {
   }, [backendAlerts]);
 
   return (
-    <div className="flex h-screen w-full flex-col overflow-y-auto overflow-x-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 lg:overflow-hidden">
+    <div className="flex min-h-0 w-full flex-1 flex-col overflow-y-auto overflow-x-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 lg:overflow-hidden">
       {/* WhatsApp false-alarm notification - deliberately neutral/gray, not
           red, since this is the AI correctly filtering noise, not an
           incident needing attention. Auto-dismisses; never blocks anything
