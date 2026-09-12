@@ -1172,7 +1172,7 @@ export default function Dashboard({ alerts = [] }) {
 
   const fetchHeatZones = () => {
     apiFetch(`/api/clusters/heat-zones`)
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`heat-zones fetch failed (${r.status})`))))
       .then(setHeatZones)
       .catch((err) => console.warn('Heat zone fetch failed:', err));
   };
@@ -1225,8 +1225,14 @@ export default function Dashboard({ alerts = [] }) {
   const [recoveryOpen, setRecoveryOpen] = useState(false);
 
   const fetchRecovery = () => {
-    apiFetch(`/api/recovery/stats`).then((r) => r.json()).then(setRecoveryStats).catch((err) => console.warn('Recovery stats fetch failed:', err));
-    apiFetch(`/api/sos/resolved`).then((r) => r.json()).then(setResolvedAlerts).catch((err) => console.warn('Resolved SOS fetch failed:', err));
+    apiFetch(`/api/recovery/stats`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`recovery-stats fetch failed (${r.status})`))))
+      .then(setRecoveryStats)
+      .catch((err) => console.warn('Recovery stats fetch failed:', err));
+    apiFetch(`/api/sos/resolved`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`resolved-sos fetch failed (${r.status})`))))
+      .then(setResolvedAlerts)
+      .catch((err) => console.warn('Resolved SOS fetch failed:', err));
   };
 
   useEffect(() => {

@@ -166,6 +166,17 @@ export default function App() {
   };
 
   useEffect(() => {
+    // Fired by apiClient.js when a request comes back 401 despite sending an
+    // operator token - the session was valid a moment ago but no longer is
+    // (a backend redeploy wipes it - see apiFetch's comment). Drops back to
+    // the login gate immediately instead of leaving Dashboard mounted and
+    // still polling with a dead token.
+    const onSessionExpired = () => setOperatorSessionState(null);
+    window.addEventListener('operator-session-expired', onSessionExpired);
+    return () => window.removeEventListener('operator-session-expired', onSessionExpired);
+  }, []);
+
+  useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
     try {
       localStorage.setItem(THEME_STORAGE_KEY, theme);

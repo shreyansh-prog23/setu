@@ -73,5 +73,21 @@ export function apiFetch(path, options = {}) {
       ...(driverToken ? { 'X-Driver-Token': driverToken } : {}),
       ...(operatorToken ? { 'X-Operator-Token': operatorToken } : {}),
     },
+  }).then((res) => {
+    // A 401 on a request that actually sent an operator token means the
+    // session is gone server-side (e.g. a backend redeploy wiped
+    // operator_sessions - Render's free tier has no persistent disk, so
+    // this happens on every deploy, not just rarely). Without this, every
+    // Dashboard poll keeps silently getting error bodies back where it
+    // expects real data, which crashes the first place that assumes array
+    // shape (see Dashboard.jsx's resolvedAlerts/heatZones fetches) and
+    // takes the whole page down. Clearing here and broadcasting once means
+    // every caller's in-flight/queued request fails the same clean way
+    // instead of each one needing its own 401 handling.
+    if (res.status === 401 && operatorToken) {
+      clearOperatorSession();
+      window.dispatchEvent(new Event('operator-session-expired'));
+    }
+    return res;
   });
 }
