@@ -11,7 +11,7 @@ import {
 const cx = (...a) => a.filter(Boolean).join(' ');
 
 const HOLD_MS = 1800;
-const RING_R = 54;
+const RING_R = 68;
 const RING_CIRC = 2 * Math.PI * RING_R;
 // Display-only fallback before a real dispatch has set lastDispatch - India's
 // geographic centroid, not a specific place, since this app is pan-India now.
@@ -1245,6 +1245,64 @@ export default function DriverView({ onTriggerSOS }) {
           )}
         </header>
 
+        {/* SOS button - deliberately the first and largest thing in the view.
+            Reaching help is the point of this screen; route planning below it
+            is the secondary task. */}
+        <section className="flex shrink-0 flex-col items-center justify-center gap-3 px-4 pb-1 pt-5">
+          <div className="relative flex h-[172px] w-[172px] items-center justify-center">
+            {!holding && (
+              <span className="absolute inset-2 animate-ping rounded-full bg-red-600/40" />
+            )}
+            <svg width={172} height={172} viewBox="0 0 172 172" className="absolute inset-0 -rotate-90">
+              <circle cx={86} cy={86} r={RING_R} stroke="#1e293b" strokeWidth={7} fill="none" />
+              <circle
+                cx={86}
+                cy={86}
+                r={RING_R}
+                stroke="#ef4444"
+                strokeWidth={7}
+                fill="none"
+                strokeLinecap="round"
+                strokeDasharray={RING_CIRC}
+                strokeDashoffset={RING_CIRC - (holdProgress / 100) * RING_CIRC}
+                style={{ transition: holding ? 'none' : 'stroke-dashoffset 0.2s ease-out' }}
+              />
+            </svg>
+            <button
+              onPointerDown={startHold}
+              onPointerUp={cancelHold}
+              onPointerLeave={cancelHold}
+              onPointerCancel={cancelHold}
+              onClick={handleSosClick}
+              onContextMenu={(e) => e.preventDefault()}
+              style={{ touchAction: 'none' }}
+              className={cx(
+                'relative z-10 flex h-[134px] w-[134px] select-none flex-col items-center justify-center gap-1 rounded-full bg-gradient-to-b from-red-500 to-red-700 text-white shadow-[0_0_45px_rgba(239,68,68,0.65)] transition-transform',
+                holding && 'scale-95 from-red-400 to-red-600'
+              )}
+            >
+              <Siren size={34} strokeWidth={2.3} />
+              <span className="text-[13px] font-bold leading-tight tracking-wide">
+                {holding ? `${Math.round(holdProgress)}%` : 'EMERGENCY'}
+              </span>
+              <span className="text-[10px] font-semibold tracking-wide opacity-90">
+                {holding ? 'HOLD…' : 'SOS'}
+              </span>
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-500 dark:text-slate-500">
+            Tap to report an incident · Hold {(HOLD_MS / 1000).toFixed(1)}s for instant SOS
+          </p>
+          <div className="w-full max-w-[280px]">
+            <input
+              value={contactPhone}
+              onChange={(e) => setContactPhone(e.target.value)}
+              placeholder="Your number (optional, so we can reach you)"
+              inputMode="tel"
+              className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-950/70 px-3 py-2 text-center text-[12px] text-slate-800 dark:text-slate-200 placeholder:text-slate-500 dark:placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
+            />
+          </div>
+        </section>
         {/* Navigation card */}
         <section className="mx-4 mt-4 shrink-0 space-y-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-900/60 p-3.5">
           <LocationField
@@ -1346,64 +1404,6 @@ export default function DriverView({ onTriggerSOS }) {
             );
           })()}
         </section>
-
-        {/* SOS button */}
-        <section className="flex flex-1 flex-col items-center justify-center gap-3 px-4">
-          <div className="relative flex h-[140px] w-[140px] items-center justify-center">
-            {!holding && (
-              <span className="absolute inset-2 animate-ping rounded-full bg-red-600/40" />
-            )}
-            <svg width={140} height={140} viewBox="0 0 140 140" className="absolute inset-0 -rotate-90">
-              <circle cx={70} cy={70} r={RING_R} stroke="#1e293b" strokeWidth={6} fill="none" />
-              <circle
-                cx={70}
-                cy={70}
-                r={RING_R}
-                stroke="#ef4444"
-                strokeWidth={6}
-                fill="none"
-                strokeLinecap="round"
-                strokeDasharray={RING_CIRC}
-                strokeDashoffset={RING_CIRC - (holdProgress / 100) * RING_CIRC}
-                style={{ transition: holding ? 'none' : 'stroke-dashoffset 0.2s ease-out' }}
-              />
-            </svg>
-            <button
-              onPointerDown={startHold}
-              onPointerUp={cancelHold}
-              onPointerLeave={cancelHold}
-              onPointerCancel={cancelHold}
-              onClick={handleSosClick}
-              onContextMenu={(e) => e.preventDefault()}
-              style={{ touchAction: 'none' }}
-              className={cx(
-                'relative z-10 flex h-[108px] w-[108px] select-none flex-col items-center justify-center gap-1 rounded-full bg-gradient-to-b from-red-500 to-red-700 text-white shadow-[0_0_35px_rgba(239,68,68,0.55)] transition-transform',
-                holding && 'scale-95 from-red-400 to-red-600'
-              )}
-            >
-              <Siren size={26} strokeWidth={2.3} />
-              <span className="text-[11px] font-bold leading-tight tracking-wide">
-                {holding ? `${Math.round(holdProgress)}%` : 'EMERGENCY'}
-              </span>
-              <span className="text-[9px] font-semibold tracking-wide opacity-90">
-                {holding ? 'HOLD…' : 'SOS'}
-              </span>
-            </button>
-          </div>
-          <p className="text-[11px] text-slate-500 dark:text-slate-500">
-            Tap to report an incident · Hold {(HOLD_MS / 1000).toFixed(1)}s for instant SOS
-          </p>
-          <div className="w-full max-w-[280px]">
-            <input
-              value={contactPhone}
-              onChange={(e) => setContactPhone(e.target.value)}
-              placeholder="Your number (optional, so we can reach you)"
-              inputMode="tel"
-              className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-950/70 px-3 py-2 text-center text-[12px] text-slate-800 dark:text-slate-200 placeholder:text-slate-500 dark:placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
-            />
-          </div>
-        </section>
-
         {/* Ground reporting */}
         <div className="shrink-0 border-t border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-900/60 p-4">
           <button
