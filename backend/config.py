@@ -29,7 +29,13 @@ class Settings:
         self.tomtom_base_url = os.getenv(
             "TOMTOM_BASE_URL", "https://api.tomtom.com/routing/1/calculateRoute"
         )
-        self.request_timeout_seconds = float(os.getenv("TOMTOM_TIMEOUT_SECONDS", "10"))
+        # 10s was too tight for the deployed backend: a truck route with
+        # alternatives is a much heavier TomTom call than a geocode, and over
+        # Render's slow outbound network every Command Center corridor refresh
+        # timed out at 10s and returned 502. That made the map fall back to
+        # hardcoded city-pair waypoints, drawing corridors as straight lines
+        # instead of following the actual road.
+        self.request_timeout_seconds = float(os.getenv("TOMTOM_TIMEOUT_SECONDS", "45"))
 
 
 @lru_cache

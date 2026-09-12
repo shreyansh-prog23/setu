@@ -155,6 +155,20 @@ def _elevation_gradient_pct(
     return round(min(steepest, 60.0), 1), steepest_index
 
 
+# One reused client rather than a fresh one per call. Opening a new
+# httpx.AsyncClient each time means a full TLS handshake to TomTom on every
+# request, which on Render's outbound path costs seconds - and the Command
+# Center refreshes a dozen corridors back to back, paying it every time.
+_client: Optional[httpx.AsyncClient] = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None:
+        _client = httpx.AsyncClient()
+    return _client
+
+
 async def _call_tomtom(
     locations_path: str,
     request: RouteRequest,
@@ -176,8 +190,7 @@ async def _call_tomtom(
     url = f"{base_url}/{locations_path}/json"
 
     try:
-        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-            resp = await client.get(url, params=params)
+        resp = await _get_client().get(url, params=params, timeout=timeout_seconds)
     except httpx.TimeoutException as exc:
         raise RoutingServiceError("TomTom routing request timed out") from exc
     except httpx.HTTPError as exc:
