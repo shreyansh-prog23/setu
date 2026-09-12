@@ -4,6 +4,7 @@ import { MapContainer, TileLayer, Marker, Polyline, Tooltip, Popup, useMap } fro
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { apiFetch } from './apiClient';
+import { CORRIDOR_GEOMETRY } from './corridorGeometry';
 import {
   Truck, AlertTriangle, MapPin, Radio, Search, Activity, Shield, Fuel,
   Package, HeartPulse, Wifi, WifiOff, X, Navigation, Clock, Siren, Plus,
@@ -207,7 +208,7 @@ const ROUTES_SEED = [
     risk: 'moderate',
     reason: 'Himalayan corridor - landslide and Zone V seismic watch',
     updated: 14,
-    waypoints: [CITIES.Jammu, CITIES.Srinagar],
+    waypoints: CORRIDOR_GEOMETRY['NH44-J'],
   },
   {
     id: 'NH27',
@@ -216,7 +217,7 @@ const ROUTES_SEED = [
     risk: 'moderate',
     reason: 'Landslide watch near Haflong hill section; intermittent heavy rain',
     updated: 14,
-    waypoints: [CITIES.Guwahati, CITIES.Nagaon, CITIES.Haflong, CITIES.Silchar],
+    waypoints: CORRIDOR_GEOMETRY['NH27'],
   },
   {
     id: 'NH29',
@@ -225,7 +226,7 @@ const ROUTES_SEED = [
     risk: 'blocked',
     reason: 'Major landslide at Chumukedima Km 42 — road closed to all traffic',
     updated: 6,
-    waypoints: [CITIES.Dimapur, CITIES.Kohima],
+    waypoints: CORRIDOR_GEOMETRY['NH29'],
   },
   {
     id: 'NH48',
@@ -234,7 +235,7 @@ const ROUTES_SEED = [
     risk: 'safe',
     reason: 'Clear, major national artery',
     updated: 20,
-    waypoints: [CITIES.Delhi, CITIES.Jaipur],
+    waypoints: CORRIDOR_GEOMETRY['NH48'],
   },
   {
     id: 'NH19',
@@ -243,7 +244,7 @@ const ROUTES_SEED = [
     risk: 'safe',
     reason: 'GT Road, Ganga floodplain watch during monsoon',
     updated: 25,
-    waypoints: [CITIES.Delhi, CITIES.Agra, CITIES.Kanpur],
+    waypoints: CORRIDOR_GEOMETRY['NH19'],
   },
   {
     id: 'NH16',
@@ -252,7 +253,7 @@ const ROUTES_SEED = [
     risk: 'moderate',
     reason: 'Bay of Bengal coast - cyclone watch',
     updated: 10,
-    waypoints: [CITIES.Bhubaneswar, CITIES.Visakhapatnam],
+    waypoints: CORRIDOR_GEOMETRY['NH16'],
   },
   {
     id: 'NH66-MG',
@@ -261,7 +262,7 @@ const ROUTES_SEED = [
     risk: 'safe',
     reason: 'Konkan coast, monsoon/flood watch',
     updated: 18,
-    waypoints: [CITIES.Mumbai, CITIES.Goa],
+    waypoints: CORRIDOR_GEOMETRY['NH66-MG'],
   },
   {
     id: 'NH544',
@@ -270,7 +271,7 @@ const ROUTES_SEED = [
     risk: 'moderate',
     reason: 'Western Ghats pass - landslide watch',
     updated: 16,
-    waypoints: [CITIES.Kochi, CITIES.Coimbatore],
+    waypoints: CORRIDOR_GEOMETRY['NH544'],
   },
   {
     id: 'NH27-PA',
@@ -279,7 +280,7 @@ const ROUTES_SEED = [
     risk: 'safe',
     reason: 'Gujarat, Kutch Zone V seismic watch',
     updated: 30,
-    waypoints: [CITIES.Porbandar, CITIES.Ahmedabad],
+    waypoints: CORRIDOR_GEOMETRY['NH27-PA'],
   },
   {
     id: 'NH44-CB',
@@ -288,7 +289,7 @@ const ROUTES_SEED = [
     risk: 'safe',
     reason: 'Clear, major southern artery',
     updated: 22,
-    waypoints: [CITIES.Chennai, CITIES.Bengaluru],
+    waypoints: CORRIDOR_GEOMETRY['NH44-CB'],
   },
   {
     id: 'NH28',
@@ -297,7 +298,7 @@ const ROUTES_SEED = [
     risk: 'moderate',
     reason: 'Bihar, Kosi/Ganga flood-prone belt',
     updated: 12,
-    waypoints: [CITIES.Patna, CITIES.Muzaffarpur],
+    waypoints: CORRIDOR_GEOMETRY['NH28'],
   },
   {
     id: 'NH66-CP',
@@ -306,7 +307,7 @@ const ROUTES_SEED = [
     risk: 'safe',
     reason: 'East coast, cyclone watch',
     updated: 28,
-    waypoints: [CITIES.Chennai, CITIES.Puducherry],
+    waypoints: CORRIDOR_GEOMETRY['NH66-CP'],
   },
 ];
 
