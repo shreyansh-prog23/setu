@@ -496,9 +496,15 @@ function Modal({ onClose, children }) {
 
 function LocationField({ label, value, onChange, onSubmit, onChip, activeName, suggestions, suggestStatus, onSelectSuggestion }) {
   const [focused, setFocused] = useState(false);
-  const showSuggestions = focused && suggestions.length > 0;
-  const showLoading = focused && suggestions.length === 0 && suggestStatus === 'loading';
-  const showError = focused && suggestions.length === 0 && suggestStatus === 'error';
+  // Picking a suggestion sets the field's text to that exact place name, which
+  // the debounced search then immediately looks up again - reopening the
+  // dropdown on top of the field below it with results nobody asked for (it
+  // covered Destination entirely after choosing an Origin). Suppressed until
+  // the next real keystroke.
+  const [picked, setPicked] = useState(false);
+  const showSuggestions = focused && !picked && suggestions.length > 0;
+  const showLoading = focused && !picked && suggestions.length === 0 && suggestStatus === 'loading';
+  const showError = focused && !picked && suggestions.length === 0 && suggestStatus === 'error';
 
   return (
     <div className="relative">
@@ -507,7 +513,10 @@ function LocationField({ label, value, onChange, onSubmit, onChip, activeName, s
         <MapPin size={13} className="shrink-0 text-slate-500 dark:text-slate-500" />
         <input
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => {
+            setPicked(false);
+            onChange(e.target.value);
+          }}
           onFocus={(e) => {
             setFocused(true);
             // Select the pre-filled hub name on focus, like a browser address
@@ -536,6 +545,7 @@ function LocationField({ label, value, onChange, onSubmit, onChip, activeName, s
               // which is exactly why it sometimes failed to register.
               onMouseDown={(e) => {
                 e.preventDefault();
+                setPicked(true);
                 onSelectSuggestion(s);
               }}
               className="block w-full truncate px-2.5 py-1.5 text-left text-[12px] text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"

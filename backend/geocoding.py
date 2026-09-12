@@ -22,8 +22,32 @@ from config import get_settings
 
 logger = logging.getLogger("geocoding")
 
-GEOCODE_URL = "https://api.tomtom.com/search/2/geocode"
+# Deliberately the fuzzy /search endpoint, NOT /geocode. /geocode is a strict
+# geocoder built for complete, well-formed addresses - given a half-typed
+# "gorakh" it matched things literally named "Gorakh" (a lane in Jammu, a
+# street in Pimpri Chinchwad) and never surfaced Gorakhpur at all. /search
+# with typeahead=true is the one built for partial input as someone types.
+# idxSet=Geo keeps results to actual places (towns, districts, states) rather
+# than streets and POIs, which is what an origin/destination field wants.
+SEARCH_URL = "https://api.tomtom.com/search/2/search"
 REVERSE_GEOCODE_URL = "https://api.tomtom.com/search/2/reverseGeocode"
+
+# TomTom ranks a half-typed query by string similarity alone, so neighbourhoods
+# ("Ayodhyapuri", "Ayodhya Nagar") crowd out the actual city - for "ayodh",
+# Ayodhya itself sat at position 9 behind eight suburbs. Ordering by how
+# place-like each result is pulls real towns and districts to the top without
+# discarding anything, since the rest still follow in TomTom's own order.
+ENTITY_RANK = {
+    "Municipality": 0,                  # cities and towns
+    "CountrySecondarySubdivision": 1,   # districts
+    "CountryTertiarySubdivision": 2,    # tehsils/taluks
+    "CountrySubdivision": 3,            # states
+}
+UNRANKED_ENTITY = 4                     # neighbourhoods, colonies, everything else
+
+# Pool fetched from TomTom before ranking/de-duping, so a city buried under a
+# pile of similarly-named suburbs can still be pulled up into the top few.
+SEARCH_POOL_SIZE = 20
 # Render's free-tier outbound network to TomTom is slow and inconsistent -
 # measured live, the same query took anywhere from 0.7s to 5.2s+ depending
 # on the request, well above what 5s used to allow. That silently killed a
@@ -61,8 +85,14 @@ async def geocode_search(query: str, limit: int = 5) -> List[dict]:
     if not query:
         return []
     settings = get_settings()
-    url = f"{GEOCODE_URL}/{quote(query)}.json"
-    params = {"key": settings.tomtom_api_key, "limit": limit, "countrySet": "IN"}
+    url = f"{SEARCH_URL}/{quote(query)}.json"
+    params = {
+        "key": settings.tomtom_api_key,
+        "limit": SEARCH_POOL_SIZE,
+        "countrySet": "IN",
+        "typeahead": "true",
+        "idxSet": "Geo",
+    }
     try:
         resp = await _get_client().get(url, params=params)
         resp.raise_for_status()
@@ -70,11 +100,29 @@ async def geocode_search(query: str, limit: int = 5) -> List[dict]:
     except Exception as exc:
         logger.warning("TomTom geocoding search failed for %r: %s", query, exc)
         return []
-    return [
-        {"name": r.get("address", {}).get("freeformAddress", query), "lat": r["position"]["lat"], "lon": r["position"]["lon"]}
-        for r in results
-        if "position" in r
-    ]
+
+    ranked = sorted(
+        (r for r in results if "position" in r),
+        key=lambda r: ENTITY_RANK.get(r.get("entityType"), UNRANKED_ENTITY),
+    )
+
+    # TomTom regularly returns the same place twice (two "New Delhi, Delhi"
+    # entries, two "Bengaluru, Karnataka"), which reads as a broken dropdown
+    # since the two rows are indistinguishable to whoever's picking one.
+    # Places that merely share a name keep different full labels ("Jaipur,
+    # Rajasthan" vs "Jaipur, Telangana"), so they both survive this.
+    seen: set[str] = set()
+    suggestions: List[dict] = []
+    for r in ranked:
+        name = r.get("address", {}).get("freeformAddress", query)
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        suggestions.append({"name": name, "lat": r["position"]["lat"], "lon": r["position"]["lon"]})
+        if len(suggestions) == limit:
+            break
+    return suggestions
 
 
 async def geocode_one(query: str) -> Optional[Tuple[float, float]]:
