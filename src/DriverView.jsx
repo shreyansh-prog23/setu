@@ -682,11 +682,19 @@ function simplifyPolyline(points, tolerancePx) {
   return [...left.slice(0, -1), ...right];
 }
 
+// A route running mostly north-south (e.g. Guwahati-Silchar) forced into a
+// fixed wide box left the line hugging a narrow vertical strip in the middle,
+// surrounded by empty space - the box didn't match the shape it was supposed
+// to show. Clamped rather than left free so a near-perfectly-straight route
+// (span ~0 on one axis) can't demand a degenerate sliver-thin or needle-tall
+// box either.
+const MIN_BOX_ASPECT = 0.8;
+const MAX_BOX_ASPECT = 2.6; // the old fixed 300x120 box's own ratio
+
 function RoutePreviewMap({ coordinates, hazards, hazardDetected }) {
   if (!coordinates || coordinates.length < 2) return null;
   const W = 300;
-  const H = 120;
-  const PAD = 10;
+  const PAD = 14;
   const lats = coordinates.map((c) => c[0]);
   const lngs = coordinates.map((c) => c[1]);
   const latSpan = Math.max(...lats) - Math.min(...lats) || 0.0005;
@@ -694,13 +702,16 @@ function RoutePreviewMap({ coordinates, hazards, hazardDetected }) {
   const midLat = (Math.max(...lats) + Math.min(...lats)) / 2;
   const midLng = (Math.max(...lngs) + Math.min(...lngs)) / 2;
   // A degree of longitude is shorter than a degree of latitude away from the
-  // equator - projecting both spans onto the box unscaled (the old behaviour)
-  // stretched whichever axis was relatively wider, bending real gentle curves
-  // into sharper, less recognizable ones. Scaling longitude by cos(latitude)
-  // keeps the route's actual shape instead of distorting it to fill the box.
+  // equator - comparing the spans unscaled (the old behaviour) stretched
+  // whichever axis was relatively wider, bending real gentle curves into
+  // sharper, less recognizable ones. Scaling longitude by cos(latitude) keeps
+  // the route's actual shape.
   const lngScale = Math.cos((midLat * Math.PI) / 180);
   const scaledLatSpan = latSpan;
   const scaledLngSpan = lngSpan * lngScale;
+  const boxAspect = Math.min(MAX_BOX_ASPECT, Math.max(MIN_BOX_ASPECT, scaledLngSpan / scaledLatSpan));
+  const H = W / boxAspect;
+
   const scale = Math.min((W - PAD * 2) / (scaledLngSpan || 1), (H - PAD * 2) / (scaledLatSpan || 1));
   const project = (lat, lng) => ({
     x: W / 2 + (lng - midLng) * lngScale * scale,
@@ -716,9 +727,15 @@ function RoutePreviewMap({ coordinates, hazards, hazardDetected }) {
   // actually change direction.
   const simplified = simplifyPolyline(projected, 1.5);
   const points = simplified.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  const [startX, startY] = simplified[0];
+  const [endX, endY] = simplified[simplified.length - 1];
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="h-[100px] w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-950/70">
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      style={{ aspectRatio: boxAspect }}
+      className="w-full min-h-[70px] max-h-[170px] rounded-lg border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-950/70"
+    >
       <polyline
         points={points}
         fill="none"
@@ -731,6 +748,13 @@ function RoutePreviewMap({ coordinates, hazards, hazardDetected }) {
         const p = project(hz.lat, hz.lng);
         return <circle key={i} cx={p.x} cy={p.y} r={4.5} fill="#ef4444" stroke="#0b1220" strokeWidth={1.5} />;
       })}
+      {/* Start/end markers - without these the line is just an abstract
+          shape with nothing anchoring it as "a journey from A to B". Colors
+          match this app's existing conventions (green = safe/start) and stay
+          distinct from the hazard dots above (red) so they don't get read as
+          hazards themselves. */}
+      <circle cx={startX} cy={startY} r={5} fill="#22c55e" stroke="#0b1220" strokeWidth={1.5} />
+      <circle cx={endX} cy={endY} r={6} fill="#38bdf8" stroke="#0b1220" strokeWidth={1.5} />
     </svg>
   );
 }
