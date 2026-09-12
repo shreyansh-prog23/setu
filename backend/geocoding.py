@@ -34,6 +34,23 @@ REVERSE_GEOCODE_URL = "https://api.tomtom.com/search/2/reverseGeocode"
 # before giving up.
 REQUEST_TIMEOUT_SECONDS = 12.0
 
+# A fresh httpx.AsyncClient() per call opens a brand new TLS connection to
+# TomTom every single time - measured live, that made identical back-to-back
+# queries take anywhere from 1s to 11s with no cold-start pattern (fast, then
+# slow, then slow, then fast), which matches a per-request handshake cost on
+# Render's outbound path far more than actual TomTom slowness (TomTom itself
+# answered the same queries in under 2s every time when called directly).
+# One shared, lazily-created client reuses its connection pool across calls,
+# so only the first request after a cold start pays for a new connection.
+_client: Optional[httpx.AsyncClient] = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None:
+        _client = httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS)
+    return _client
+
 
 async def geocode_search(query: str, limit: int = 5) -> List[dict]:
     """Returns up to `limit` real matches for a free-text place search,
@@ -47,8 +64,7 @@ async def geocode_search(query: str, limit: int = 5) -> List[dict]:
     url = f"{GEOCODE_URL}/{quote(query)}.json"
     params = {"key": settings.tomtom_api_key, "limit": limit, "countrySet": "IN"}
     try:
-        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
-            resp = await client.get(url, params=params)
+        resp = await _get_client().get(url, params=params)
         resp.raise_for_status()
         results = resp.json().get("results", [])
     except Exception as exc:
@@ -75,8 +91,7 @@ async def reverse_geocode(lat: float, lon: float) -> Optional[dict]:
     in main.py). Returns {"city", "state"} or None if the lookup fails."""
     url = f"{REVERSE_GEOCODE_URL}/{lat},{lon}.json"
     try:
-        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
-            resp = await client.get(url, params={"key": get_settings().tomtom_api_key})
+        resp = await _get_client().get(url, params={"key": get_settings().tomtom_api_key})
         resp.raise_for_status()
         addresses = resp.json().get("addresses", [])
     except Exception as exc:
