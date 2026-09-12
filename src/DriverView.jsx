@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { apiFetch } from './apiClient';
 import { queuePendingRequest, getPendingCount, onQueueChange } from './offlineQueue';
 import {
-  Truck, Wifi, WifiOff, ShieldAlert, ArrowRight, AlertTriangle,
+  Truck, ShieldAlert, ArrowRight, AlertTriangle,
   Navigation, Siren, CheckCircle2, Send, X, ImagePlus, ChevronDown,
   MapPin, Loader2, Mountain, Waves, Wrench, HeartPulse, Construction,
   Clock, Info, TrendingUp,
@@ -62,10 +62,6 @@ const SEVERITY_LEVELS = [
   { key: 'Moderate', sub: 'Delay', icon: Clock, cls: 'border-amber-500/50 bg-amber-500/15 text-amber-600 dark:text-amber-300' },
   { key: 'Informational', sub: '', icon: Info, cls: 'border-sky-500/50 bg-sky-500/15 text-sky-600 dark:text-sky-300' },
 ];
-
-function toSmsCode(str) {
-  return (str || 'UNKNOWN').toString().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-}
 
 function haversineKm(lat1, lng1, lat2, lng2) {
   const R = 6371;
@@ -385,7 +381,6 @@ function HazardBreakdownRow({ hazardKey, data }) {
 }
 
 const DEGRADED_MESSAGES = {
-  offline: 'AI Corridor Risk Assessment unavailable (offline mode)',
   timeout: 'Live risk scoring timed out — the server may be waking up from idle. Tap Plan Route again in a moment.',
   error: "Couldn't reach live risk scoring right now. Tap Plan Route again.",
 };
@@ -396,7 +391,7 @@ function AiCorridorRiskCard({ safetyScore, riskLevel, riskFactors, hazardBreakdo
   if (!tone) {
     return (
       <div className="rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800/40 p-2.5 text-[11px] text-slate-500 dark:text-slate-500">
-        {DEGRADED_MESSAGES[degradedReason] || DEGRADED_MESSAGES.offline}
+        {DEGRADED_MESSAGES[degradedReason] || DEGRADED_MESSAGES.error}
       </div>
     );
   }
@@ -695,11 +690,9 @@ function RoutePreviewMap({ coordinates, hazards, hazardDetected }) {
 
 export default function DriverView({ onTriggerSOS }) {
   const [pendingCount, setPendingCount] = useState(() => getPendingCount());
-  const [online, setOnline] = useState(true);
-  const [activeModal, setActiveModal] = useState(null); // 'sos-online' | 'sos-offline' | 'sos-report' | 'obstacle' | null
+  const [activeModal, setActiveModal] = useState(null); // 'sos-online' | 'sos-report' | 'obstacle' | null
   const [holding, setHolding] = useState(false);
   const [holdProgress, setHoldProgress] = useState(0);
-  const [smsSent, setSmsSent] = useState(false);
   const [obstacleType, setObstacleType] = useState('Landslide');
   const [obstacleDescription, setObstacleDescription] = useState('');
   const [obstacleSubmitting, setObstacleSubmitting] = useState(false);
@@ -842,7 +835,7 @@ export default function DriverView({ onTriggerSOS }) {
     return () => navigator.geolocation.clearWatch(watchId);
   }, []);
 
-  const runPlanner = async (src, dest, offline) => {
+  const runPlanner = async (src, dest) => {
     if (!src || !dest) {
       setRouteError('Search and select both an origin and destination.');
       return;
@@ -852,12 +845,6 @@ export default function DriverView({ onTriggerSOS }) {
 
     const token = ++plannerTokenRef.current;
     if (plannerAbortRef.current) plannerAbortRef.current.abort();
-
-    if (offline) {
-      setRouteResult(computeCachedRoute(src, dest, 'offline'));
-      setRouteLoading(false);
-      return;
-    }
 
     const controller = new AbortController();
     plannerAbortRef.current = controller;
@@ -921,7 +908,7 @@ export default function DriverView({ onTriggerSOS }) {
       setDestCoords(dest);
       setDestInput(dest.name);
     }
-    runPlanner(src, dest, !online);
+    runPlanner(src, dest);
   };
 
   const selectSourceHub = (hub) => {
@@ -960,18 +947,9 @@ export default function DriverView({ onTriggerSOS }) {
     setDestCoords(null);
   };
 
-  const toggleOnline = () => {
-    setOnline((o) => {
-      const next = !o;
-      if (routeResult) runPlanner(sourceCoords, destCoords, !next);
-      return next;
-    });
-  };
-
   // Shared dispatch path for both Instant SOS (long-press) and the Detailed
   // Incident Report modal — both capture live GPS and POST to /api/sos.
   const dispatchIncident = async ({ category, severity, note, source, peopleAffected, contactPhone: phoneArg = '' }) => {
-    const isOffline = !online;
     // Immediate feedback the instant the hold completes/tap registers -
     // without this, the gap between releasing the button and the real
     // dispatchSos response landing (which on the deployed Render free tier
@@ -981,7 +959,7 @@ export default function DriverView({ onTriggerSOS }) {
     // send was even attempted) accidentally introduced this - honesty
     // about the eventual result doesn't have to mean silence in the
     // meantime.
-    setActiveModal(isOffline ? 'sos-offline' : 'sos-sending');
+    setActiveModal('sos-sending');
 
     const fix = await getSosCoords();
     // No fabricated coordinate here - a wrong position is worse than a known
@@ -989,7 +967,7 @@ export default function DriverView({ onTriggerSOS }) {
     // than discarded so naming a location can finish sending it, instead of
     // making someone re-enter everything mid-emergency.
     if (!fix) {
-      setPendingSos({ category, severity, note, source, peopleAffected, phoneArg, isOffline });
+      setPendingSos({ category, severity, note, source, peopleAffected, phoneArg });
       setActiveModal('sos-no-location');
       return;
     }
@@ -1000,7 +978,7 @@ export default function DriverView({ onTriggerSOS }) {
       accuracyM != null && accuracyM > COARSE_FIX_THRESHOLD_M
         ? `Approximate location (±${Math.round(accuracyM / 1000)}km)`
         : null;
-    await completeDispatch({ lat, lng, fixLabel, category, severity, note, source, peopleAffected, phoneArg, isOffline });
+    await completeDispatch({ lat, lng, fixLabel, category, severity, note, source, peopleAffected, phoneArg });
   };
 
   // Sending a manually-named location finishes the SOS the driver already
@@ -1009,7 +987,7 @@ export default function DriverView({ onTriggerSOS }) {
     const held = pendingSos;
     if (!held) return;
     setPendingSos(null);
-    setActiveModal(held.isOffline ? 'sos-offline' : 'sos-sending');
+    setActiveModal('sos-sending');
     await completeDispatch({
       ...held,
       lat: place.lat,
@@ -1021,34 +999,10 @@ export default function DriverView({ onTriggerSOS }) {
 
   // Everything from "the position is known" onward, shared by the GPS path and
   // the manual one - they differ only in where the coordinates came from.
-  const completeDispatch = async ({ lat, lng, fixLabel, category, severity, note, source, peopleAffected, phoneArg, isOffline }) => {
+  const completeDispatch = async ({ lat, lng, fixLabel, category, severity, note, source, peopleAffected, phoneArg }) => {
     setLastDispatch({ lat, lng, category, severity, note });
 
-    if (isOffline) {
-      onTriggerSOS?.({
-        id: `SOS-${Date.now().toString().slice(-4)}`,
-        type: 'sos',
-        source: 'SMS FALLBACK ALERT',
-        offline: true, // local-only display item (Dashboard renders it from this alone) - the real send below is separate and queued, not tied to this flag
-        category,
-        severity,
-        note,
-        cargo: `${severity}: ${category}`,
-        vehicle: 'Ambulance',
-        lat,
-        lng,
-        locationName: fixLabel,
-        location: `${lat.toFixed(4)}° N, ${lng.toFixed(4)}° E`,
-        description: note || `${category} — SMS fallback relay, no cellular network.`,
-        time: 'Just now',
-      });
-      // dispatchSos queues this for real delivery on failure (see
-      // offlineQueue.js) instead of the report just vanishing once this
-      // toast disappears - this used to be a purely local simulation with
-      // no real send attempted at all.
-      dispatchSos(lat, lng, { incidentType: category, severity, notes: note, mode: source, peopleAffected, contactPhone: phoneArg }).catch(() => {});
-      setToast('SOS queued — will send automatically once signal returns');
-    } else {
+    {
       // Success is shown only once the send is actually confirmed - this
       // used to show "Instant SOS Dispatched" unconditionally before even
       // attempting the send, so a real failure (expired session, dropped
@@ -1178,7 +1132,7 @@ export default function DriverView({ onTriggerSOS }) {
         const result = await res.json();
         setReportOutcome({ isNew: result.is_new, confirmations: result.confirmations });
         setHazardMarkers((prev) => [...prev, { lat, lng, type: obstacleType }]);
-        runPlanner(sourceCoords, destCoords, !online);
+        runPlanner(sourceCoords, destCoords);
       } catch (err) {
         // A real failure queues this for retry instead of silently
         // dropping it while the UI still claimed success (see offlineQueue.js).
@@ -1194,7 +1148,6 @@ export default function DriverView({ onTriggerSOS }) {
 
   const closeModal = () => {
     setActiveModal(null);
-    setSmsSent(false);
     setReportSubmitted(false);
     setReportOutcome(null);
     setReportQueued(false);
@@ -1223,18 +1176,6 @@ export default function DriverView({ onTriggerSOS }) {
               <Truck size={16} className="shrink-0 text-sky-600 dark:text-sky-400" />
               <span className="truncate text-sm font-bold tracking-wide">Driver Mobile View</span>
             </div>
-            <button
-              onClick={toggleOnline}
-              className={cx(
-                'flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition',
-                online
-                  ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                  : 'border-red-500/40 bg-red-500/15 text-red-600 dark:text-red-400'
-              )}
-            >
-              {online ? <Wifi size={12} /> : <WifiOff size={12} />}
-              {online ? '4G Online' : 'Zero Network'}
-            </button>
           </div>
 
           {pendingCount > 0 && (
@@ -1527,48 +1468,6 @@ export default function DriverView({ onTriggerSOS }) {
                 className="w-full rounded-lg border border-slate-300 py-2 text-xs font-semibold text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
               >
                 Cancel — I'll call it in instead
-              </button>
-            </div>
-          </Modal>
-        )}
-
-        {/* SOS Offline modal */}
-        {activeModal === 'sos-offline' && (
-          <Modal onClose={closeModal}>
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500/15">
-                  <WifiOff size={20} className="text-amber-600 dark:text-amber-400" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">No Cellular Data Detected</h3>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">Falling back to compressed SMS relay</p>
-                </div>
-              </div>
-              <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-950/70 p-2.5">
-                <div className="mb-1 text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-500">SMS Payload</div>
-                <code className="block break-all font-mono text-[12px] text-amber-600 dark:text-amber-300">
-                  SOS|{(lastDispatch?.lat ?? SOS_LAT).toFixed(4)},{(lastDispatch?.lng ?? SOS_LNG).toFixed(4)}|
-                  {toSmsCode(lastDispatch?.severity)}|{toSmsCode(lastDispatch?.category)}
-                </code>
-              </div>
-              {!smsSent ? (
-                <button
-                  onClick={() => setSmsSent(true)}
-                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-600 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-500"
-                >
-                  <Send size={15} /> Send SMS Fallback via Native Carrier
-                </button>
-              ) : (
-                <div className="flex items-center justify-center gap-2 rounded-lg bg-emerald-500/15 py-2.5 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-                  <CheckCircle2 size={16} /> Dispatched via SMS Gateway
-                </div>
-              )}
-              <button
-                onClick={closeModal}
-                className="w-full rounded-lg border border-slate-300 dark:border-slate-700 py-2 text-xs font-medium text-slate-500 dark:text-slate-400 transition hover:text-slate-800 dark:hover:text-slate-200"
-              >
-                Close
               </button>
             </div>
           </Modal>
