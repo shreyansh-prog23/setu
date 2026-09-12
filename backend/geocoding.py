@@ -24,7 +24,15 @@ logger = logging.getLogger("geocoding")
 
 GEOCODE_URL = "https://api.tomtom.com/search/2/geocode"
 REVERSE_GEOCODE_URL = "https://api.tomtom.com/search/2/reverseGeocode"
-REQUEST_TIMEOUT_SECONDS = 5.0
+# Render's free-tier outbound network to TomTom is slow and inconsistent -
+# measured live, the same query took anywhere from 0.7s to 5.2s+ depending
+# on the request, well above what 5s used to allow. That silently killed a
+# real (not failed) in-flight lookup and returned an empty list - which the
+# frontend can't tell apart from "no matches", so autocomplete looked like
+# it just wasn't loading. Frontend's own hard cap (DriverView.jsx's
+# GEOCODE_TIMEOUT_MS) is 20s, so there's plenty of room to wait longer here
+# before giving up.
+REQUEST_TIMEOUT_SECONDS = 12.0
 
 
 async def geocode_search(query: str, limit: int = 5) -> List[dict]:
