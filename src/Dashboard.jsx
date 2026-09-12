@@ -52,12 +52,15 @@ const MAP_TYPES = {
   },
 };
 
-function divIcon(node, size, popupAnchor) {
+// iconAnchor defaults to the centre, which is right for a symbol sitting *on*
+// a point. A teardrop pin instead points at its location from above, so it
+// passes its own anchor (the tip) rather than being centred on the spot.
+function divIcon(node, size, popupAnchor, iconAnchor) {
   return L.divIcon({
     html: renderToStaticMarkup(node),
     className: '',
     iconSize: size,
-    iconAnchor: [size[0] / 2, size[1] / 2],
+    iconAnchor: iconAnchor || [size[0] / 2, size[1] / 2],
     ...(popupAnchor ? { popupAnchor } : {}),
   });
 }
@@ -830,11 +833,14 @@ function ConvoyMarker({ convoy, onSelect, active }) {
   const icon = useMemo(
     () =>
       divIcon(
-        <div className={cx('relative flex h-6 w-6 items-center justify-center rounded-full ring-2 shadow-lg', style.bg, style.ring, style.glow, active && 'ring-4 scale-110')}>
-          <Icon size={11} className="text-slate-950" strokeWidth={2.5} />
-          <span className={cx('absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-slate-950', CONVOY_STATUS_DOT[convoy.status])} />
+        // Convoys are continuous context rather than something needing a
+        // response, so they stay the smallest, quietest marker - they used to
+        // be the *largest* on the map, outweighing the SOS pins.
+        <div className={cx('relative flex h-[19px] w-[19px] items-center justify-center rounded-full ring-1 shadow-md', style.bg, style.ring, active && 'ring-[3px] scale-110')}>
+          <Icon size={10} className="text-slate-950" strokeWidth={2.5} />
+          <span className={cx('absolute -bottom-0.5 -right-0.5 h-[7px] w-[7px] rounded-full border border-slate-950', CONVOY_STATUS_DOT[convoy.status])} />
         </div>,
-        [24, 24]
+        [19, 19]
       ),
     [Icon, style, active, convoy.status]
   );
@@ -894,29 +900,40 @@ function SosMarker({ sos, onSelect, active, isNew, dispatch }) {
   const cityName = useCityName(sos.lat, sos.lng);
   const icon = useMemo(
     () =>
+      // A distress call is the most important thing on this map, so it gets
+      // the largest marker and the only teardrop silhouette - recognisable as
+      // "an emergency here" at national zoom, and distinguishable from hazards
+      // and convoys by shape alone rather than colour (which fails at a glance
+      // and for colour-blind operators).
       divIcon(
-        <div className="relative flex h-5 w-5 items-center justify-center">
+        <div className="relative" style={{ width: 34, height: 44 }}>
           {!dispatch && (
-            <span className={cx('absolute inset-0 rounded-full bg-red-500/40', isNew ? 'animate-ping' : 'animate-ping [animation-duration:2s]')} />
+            <span
+              className={cx('absolute rounded-full bg-red-500/50', isNew ? 'animate-ping' : 'animate-ping [animation-duration:2s]')}
+              style={{ left: 7, top: 6, width: 20, height: 20 }}
+            />
           )}
-          <div
-            className={cx(
-              'relative flex h-4 w-4 items-center justify-center rounded-full ring-1 shadow-lg',
-              dispatch ? 'bg-emerald-600 ring-emerald-300/60 shadow-emerald-600/60' : 'bg-red-600 ring-red-300/60 shadow-red-600/60',
-              active && 'ring-2 scale-125'
-            )}
-          >
-            {dispatch ? <Truck size={9} className="text-white" strokeWidth={2.5} /> : <Siren size={9} className="text-white" strokeWidth={2.5} />}
+          <svg width="34" height="44" viewBox="0 0 34 44" className="absolute inset-0 drop-shadow-md">
+            <path
+              d="M17 43C17 43 31 26 31 15.5A14 14 0 1 0 3 15.5C3 26 17 43 17 43Z"
+              fill={dispatch ? '#059669' : '#dc2626'}
+              stroke={dispatch ? '#6ee7b7' : '#fecaca'}
+              strokeWidth={active ? 3 : 1.75}
+            />
+          </svg>
+          <div className="absolute flex justify-center text-white" style={{ left: 0, top: 7, width: 34 }}>
+            {dispatch ? <Truck size={15} strokeWidth={2.4} /> : <Siren size={15} strokeWidth={2.4} />}
           </div>
         </div>,
-        [20, 20],
-        [0, 18] // pushes the click-popup below the pin instead of Leaflet's default of above it - see popupAnchor in divIcon()
+        [34, 44],
+        [0, 6], // popup sits just below the pin's tip rather than Leaflet's default of above it
+        [17, 43] // anchored at the tip, so the pin points at the actual coordinate
       ),
     [isNew, active, dispatch]
   );
   return (
     <Marker position={[sos.lat, sos.lng]} icon={icon} eventHandlers={{ click: () => onSelect(sos) }}>
-      <Tooltip direction="top" offset={[0, -14]}>
+      <Tooltip direction="top" offset={[0, -46]}>
         {dispatch
           ? `✅ Rescue Dispatched · ETA ${dispatch.etaMin}m${cityName ? ` | ${cityName}` : ''} | Lat: ${sos.lat.toFixed(4)}, Lon: ${sos.lng.toFixed(4)}`
           : `🚨 SOS Active${cityName ? ` | ${cityName}` : ''} | Lat: ${sos.lat.toFixed(4)}, Lon: ${sos.lng.toFixed(4)}`}
@@ -943,14 +960,19 @@ function HazardMarker({ hazard, onSelect, active }) {
   const cfg = RISK_CONFIG[mapHazardSeverity(hazard.severity)];
   const icon = useMemo(
     () =>
+      // Diamond, not a circle - a hazard blocks a stretch of road rather than
+      // being a call for help, and the different silhouette keeps it from
+      // reading as a quieter SOS pin.
       divIcon(
-        <div
-          className={cx('flex h-4 w-4 items-center justify-center rounded-full ring-1 shadow-lg ring-slate-950/60', active && 'ring-2 scale-110')}
-          style={{ background: cfg.stroke }}
-        >
-          <AlertTriangle size={9} className="text-slate-950" strokeWidth={2.5} />
+        <div className="flex items-center justify-center" style={{ width: 26, height: 26 }}>
+          <div
+            className={cx('flex h-[18px] w-[18px] rotate-45 items-center justify-center rounded-[2px] shadow-md ring-1 ring-slate-950/70', active && 'ring-2 scale-110')}
+            style={{ background: cfg.stroke }}
+          >
+            <span className="-rotate-45 text-[11px] font-black leading-none text-slate-950">!</span>
+          </div>
         </div>,
-        [18, 18]
+        [26, 26]
       ),
     [cfg.stroke, active]
   );
