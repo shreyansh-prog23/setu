@@ -495,6 +495,53 @@ function ElevationSparkline({ elevations, maxGradientPct, steepestSegmentIndex }
   );
 }
 
+// Last resort when the device can't produce a position at all: let the person
+// say where they are. GPS being unavailable is a normal disaster-response
+// condition (indoors, no satellite lock, an area whose wifi isn't in any
+// location database), and a stated location beats no report reaching anyone.
+// Reuses the same backend place search as the route fields.
+function ManualLocationPicker({ onPick }) {
+  const [query, setQuery] = useState('');
+  const { suggestions, status } = useGeocodeSuggestions(query);
+
+  return (
+    <div className="space-y-2 text-left">
+      <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400">
+        Where are you? Village, town or district
+      </label>
+      <div className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-950/70 px-2.5 py-1.5">
+        <MapPin size={13} className="shrink-0 text-slate-500 dark:text-slate-500" />
+        <input
+          autoFocus
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="e.g. Kurukshetra"
+          className="w-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-600 dark:placeholder:text-slate-600 focus:outline-none"
+        />
+      </div>
+      {status === 'loading' && suggestions.length === 0 && (
+        <p className="text-[11px] text-slate-500 dark:text-slate-500">Searching…</p>
+      )}
+      {status === 'error' && suggestions.length === 0 && (
+        <p className="text-[11px] text-amber-600 dark:text-amber-300">Couldn't load places — keep typing to retry.</p>
+      )}
+      {suggestions.length > 0 && (
+        <div className="max-h-44 overflow-y-auto rounded-lg border border-slate-300 dark:border-slate-700">
+          {suggestions.map((s, i) => (
+            <button
+              key={`${s.lat},${s.lon}-${i}`}
+              onClick={() => onPick(s)}
+              className="block w-full truncate border-b border-slate-200 px-2.5 py-2 text-left text-[12px] text-slate-600 last:border-b-0 hover:bg-slate-100 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              {s.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Modal({ onClose, children }) {
   return (
     <div
@@ -662,6 +709,7 @@ export default function DriverView({ onTriggerSOS }) {
   const [reportQueued, setReportQueued] = useState(false); // true if the real send failed and got queued for retry, not actually delivered yet
   const [toast, setToast] = useState(null);
   const [lastDispatch, setLastDispatch] = useState(null); // { lat, lng, category, severity, note }
+  const [pendingSos, setPendingSos] = useState(null); // a triggered SOS held while the reporter names their location, because GPS gave nothing
   const [hazardMarkers, setHazardMarkers] = useState([]); // driver-reported hazards, this session
   const [zoneWarning, setZoneWarning] = useState(null); // { hazard, level, score } - live "entering a high-risk area" popup
   const [risingWarning, setRisingWarning] = useState(null); // { hazard, projectedScore } - "conditions worsening nearby" popup, distinct from zoneWarning (not HIGH yet, but trending that way)
@@ -937,9 +985,11 @@ export default function DriverView({ onTriggerSOS }) {
 
     const fix = await getSosCoords();
     // No fabricated coordinate here - a wrong position is worse than a known
-    // missing one, because responders act on it. The driver gets told straight
-    // away so they can grant location access and retry, or call it in.
+    // missing one, because responders act on it. The report is held rather
+    // than discarded so naming a location can finish sending it, instead of
+    // making someone re-enter everything mid-emergency.
     if (!fix) {
+      setPendingSos({ category, severity, note, source, peopleAffected, phoneArg, isOffline });
       setActiveModal('sos-no-location');
       return;
     }
@@ -950,6 +1000,28 @@ export default function DriverView({ onTriggerSOS }) {
       accuracyM != null && accuracyM > COARSE_FIX_THRESHOLD_M
         ? `Approximate location (±${Math.round(accuracyM / 1000)}km)`
         : null;
+    await completeDispatch({ lat, lng, fixLabel, category, severity, note, source, peopleAffected, phoneArg, isOffline });
+  };
+
+  // Sending a manually-named location finishes the SOS the driver already
+  // triggered, rather than starting a new one.
+  const submitManualLocation = async (place) => {
+    const held = pendingSos;
+    if (!held) return;
+    setPendingSos(null);
+    setActiveModal(held.isOffline ? 'sos-offline' : 'sos-sending');
+    await completeDispatch({
+      ...held,
+      lat: place.lat,
+      lng: place.lon,
+      // Flagged as self-reported so nobody reads it as a satellite fix.
+      fixLabel: `Location stated by reporter: ${place.name}`,
+    });
+  };
+
+  // Everything from "the position is known" onward, shared by the GPS path and
+  // the manual one - they differ only in where the coordinates came from.
+  const completeDispatch = async ({ lat, lng, fixLabel, category, severity, note, source, peopleAffected, phoneArg, isOffline }) => {
     setLastDispatch({ lat, lng, category, severity, note });
 
     if (isOffline) {
@@ -1443,20 +1515,18 @@ export default function DriverView({ onTriggerSOS }) {
                 <MapPin size={26} className="text-red-600 dark:text-red-400" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">Location Unavailable — SOS Not Sent</h3>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">Couldn't Get Your Location</h3>
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  Your device wouldn't give a position, so nothing was sent. Guessing a location would send responders to the
-                  wrong place.
-                </p>
-                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                  Allow location access for this site and try again. If it still fails, call the emergency line directly.
+                  Your device didn't return a position, and guessing one would send responders to the wrong place. Tell us
+                  where you are and the SOS goes out immediately.
                 </p>
               </div>
+              <ManualLocationPicker onPick={submitManualLocation} />
               <button
                 onClick={closeModal}
-                className="w-full rounded-lg bg-red-600 py-2.5 text-sm font-semibold text-white transition hover:bg-red-500"
+                className="w-full rounded-lg border border-slate-300 py-2 text-xs font-semibold text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
               >
-                Close
+                Cancel — I'll call it in instead
               </button>
             </div>
           </Modal>
