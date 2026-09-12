@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useReducer, useRef } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MapContainer, TileLayer, Marker, Polyline, Tooltip, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -422,11 +422,21 @@ const CARGO_PRIORITIES = [
 // is still NE-only, so filtering by a newly-added state here will correctly
 // show zero mock items rather than fabricated ones, until that seed data
 // gets a real pan-India pass too.
+// All 28 states + 8 union territories, spelled as TomTom's reverse geocoder
+// returns them (countrySubdivisionName) so a resolved SOS actually matches a
+// chip. The list used to stop at 18, which meant a real report from e.g.
+// Haryana resolved correctly but had no chip to filter it by. The "+N more"
+// expander keeps the row from growing.
 const STATE_LIST = [
   'All', 'Assam', 'Meghalaya', 'Nagaland', 'Manipur',
-  'Jammu and Kashmir', 'Delhi', 'Rajasthan', 'Uttar Pradesh', 'Odisha',
-  'Andhra Pradesh', 'Maharashtra', 'Goa', 'Kerala', 'Tamil Nadu',
-  'Karnataka', 'Gujarat', 'Bihar',
+  'Jammu and Kashmir', 'Delhi', 'Haryana', 'Punjab', 'Rajasthan',
+  'Uttar Pradesh', 'Uttarakhand', 'Himachal Pradesh', 'Ladakh', 'Chandigarh',
+  'Bihar', 'Jharkhand', 'West Bengal', 'Odisha', 'Sikkim',
+  'Arunachal Pradesh', 'Mizoram', 'Tripura',
+  'Madhya Pradesh', 'Chhattisgarh', 'Gujarat', 'Maharashtra', 'Goa',
+  'Andhra Pradesh', 'Telangana', 'Karnataka', 'Kerala', 'Tamil Nadu',
+  'Puducherry', 'Andaman and Nicobar Islands', 'Lakshadweep',
+  'Dadra and Nagar Haveli and Daman and Diu',
 ];
 const ISOLATED_DISTRICTS = ['Kohima Rural Belt', 'Peren', 'Kutch Rural Belt'];
 
@@ -858,7 +868,44 @@ function ConvoyMarker({ convoy, onSelect, active }) {
 // instance and persists across re-renders/remounts, keyed by rounded
 // coordinate so nearby markers reuse one lookup instead of each firing
 // their own reverse-geocode call.
-const _cityNameCache = new Map();
+//
+// Holds { city, state } once resolved, or null when the lookup finished with
+// nothing usable. A key mapped to undefined is in flight; an absent key was
+// never requested. The map markers and the alert feed's state filter share
+// this, so a coordinate is reverse-geocoded exactly once for both.
+const _placeCache = new Map();
+const _placeSubscribers = new Set();
+
+function placeKey(lat, lng) {
+  return `${lat.toFixed(2)},${lng.toFixed(2)}`;
+}
+
+function requestPlace(lat, lng) {
+  const key = placeKey(lat, lng);
+  if (_placeCache.has(key)) return;
+  _placeCache.set(key, undefined); // claimed, so concurrent callers don't refetch
+  apiFetch(`/api/geocode/reverse?lat=${lat}&lon=${lng}`)
+    .then((res) => (res.ok ? res.json() : null))
+    .then((data) => {
+      _placeCache.set(key, data?.city ? { city: data.city, state: data.state || null } : null);
+    })
+    // A genuine network failure has to land in the cache as null too, or the
+    // coordinate stays "in flight" forever and never falls back to showing
+    // raw coordinates.
+    .catch(() => _placeCache.set(key, null))
+    .finally(() => _placeSubscribers.forEach((notify) => notify()));
+}
+
+// Re-renders the caller whenever any reverse-geocode lands, so a resolved
+// place name appears without waiting for an unrelated state change.
+function usePlaceUpdates() {
+  const [version, bump] = useReducer((n) => n + 1, 0);
+  useEffect(() => {
+    _placeSubscribers.add(bump);
+    return () => _placeSubscribers.delete(bump);
+  }, []);
+  return version;
+}
 
 // Returns undefined while the lookup is genuinely still in flight, null once
 // it's actually finished with no name to show (failed or found nothing), or
@@ -867,34 +914,15 @@ const _cityNameCache = new Map();
 // so a location the geocoder couldn't resolve showed "Resolving..." forever
 // instead of an honest fallback).
 function useCityName(lat, lng) {
-  const key = `${lat.toFixed(2)},${lng.toFixed(2)}`;
-  const [name, setName] = useState(() => _cityNameCache.get(key));
+  const key = placeKey(lat, lng);
+  usePlaceUpdates();
   useEffect(() => {
-    if (_cityNameCache.has(key)) {
-      setName(_cityNameCache.get(key));
-      return undefined;
-    }
-    let cancelled = false;
-    apiFetch(`/api/geocode/reverse?lat=${lat}&lon=${lng}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        const resolved = data?.city ? `${data.city}${data.state ? `, ${data.state}` : ''}` : null;
-        _cityNameCache.set(key, resolved);
-        if (!cancelled) setName(resolved);
-      })
-      .catch(() => {
-        // Used to only update the cache here, never the component's own
-        // state - a genuine network failure left this specific mount stuck
-        // showing "still loading" forever, even though a later mount for
-        // the same coordinates would've correctly read the cached null.
-        _cityNameCache.set(key, null);
-        if (!cancelled) setName(null);
-      });
-    return () => {
-      cancelled = true;
-    };
+    requestPlace(lat, lng);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
-  return name;
+  const place = _placeCache.get(key);
+  if (place === undefined) return undefined;
+  return place ? `${place.city}${place.state ? `, ${place.state}` : ''}` : null;
 }
 
 function SosMarker({ sos, onSelect, active, isNew, dispatch }) {
@@ -907,34 +935,34 @@ function SosMarker({ sos, onSelect, active, isNew, dispatch }) {
       // and convoys by shape alone rather than colour (which fails at a glance
       // and for colour-blind operators).
       divIcon(
-        <div className="relative" style={{ width: 34, height: 44 }}>
+        <div className="relative" style={{ width: 24, height: 31 }}>
           {!dispatch && (
             <span
               className={cx('absolute rounded-full bg-red-500/50', isNew ? 'animate-ping' : 'animate-ping [animation-duration:2s]')}
-              style={{ left: 7, top: 6, width: 20, height: 20 }}
+              style={{ left: 5, top: 4, width: 14, height: 14 }}
             />
           )}
-          <svg width="34" height="44" viewBox="0 0 34 44" className="absolute inset-0 drop-shadow-md">
+          <svg width="24" height="31" viewBox="0 0 24 31" className="absolute inset-0 drop-shadow-md">
             <path
-              d="M17 43C17 43 31 26 31 15.5A14 14 0 1 0 3 15.5C3 26 17 43 17 43Z"
+              d="M12 30C12 30 22 18 22 11A10 10 0 1 0 2 11C2 18 12 30 12 30Z"
               fill={dispatch ? '#059669' : '#dc2626'}
               stroke={dispatch ? '#6ee7b7' : '#fecaca'}
-              strokeWidth={active ? 3 : 1.75}
+              strokeWidth={active ? 2.5 : 1.5}
             />
           </svg>
-          <div className="absolute flex justify-center text-white" style={{ left: 0, top: 7, width: 34 }}>
-            {dispatch ? <Truck size={15} strokeWidth={2.4} /> : <Siren size={15} strokeWidth={2.4} />}
+          <div className="absolute flex justify-center text-white" style={{ left: 0, top: 5, width: 24 }}>
+            {dispatch ? <Truck size={11} strokeWidth={2.5} /> : <Siren size={11} strokeWidth={2.5} />}
           </div>
         </div>,
-        [34, 44],
+        [24, 31],
         [0, 6], // popup sits just below the pin's tip rather than Leaflet's default of above it
-        [17, 43] // anchored at the tip, so the pin points at the actual coordinate
+        [12, 30] // anchored at the tip, so the pin points at the actual coordinate
       ),
     [isNew, active, dispatch]
   );
   return (
     <Marker position={[sos.lat, sos.lng]} icon={icon} eventHandlers={{ click: () => onSelect(sos) }}>
-      <Tooltip direction="top" offset={[0, -46]}>
+      <Tooltip direction="top" offset={[0, -33]}>
         {dispatch
           ? `✅ Rescue Dispatched · ETA ${dispatch.etaMin}m${cityName ? ` | ${cityName}` : ''} | Lat: ${sos.lat.toFixed(4)}, Lon: ${sos.lng.toFixed(4)}`
           : `🚨 SOS Active${cityName ? ` | ${cityName}` : ''} | Lat: ${sos.lat.toFixed(4)}, Lon: ${sos.lng.toFixed(4)}`}
@@ -1529,10 +1557,35 @@ export default function Dashboard({ alerts = [] }) {
     [liveHazards]
   );
 
+  const placeVersion = usePlaceUpdates();
+
+  // Kick off a lookup for anything in the feed that has coordinates but no
+  // state yet. requestPlace de-dupes per rounded coordinate, so this costs
+  // nothing for the ones the map markers have already resolved.
+  useEffect(() => {
+    [...driverSos, ...sosPings].forEach((i) => {
+      if (!i.state && Number.isFinite(i.lat) && Number.isFinite(i.lng)) requestPlace(i.lat, i.lng);
+    });
+  }, [driverSos, sosPings]);
+
+  // A real report reaches the backend as bare coordinates - nothing fills in
+  // state or district - so every one of them carried state: '' and was hidden
+  // the moment any state chip was picked, leaving only the seeded demo alerts
+  // visible. Backfilling from the same reverse-geocode the map markers already
+  // run makes a real SOS filterable and searchable exactly like a seeded one.
+  const withResolvedRegion = (item) => {
+    if (item.state || !Number.isFinite(item.lat) || !Number.isFinite(item.lng)) return item;
+    const place = _placeCache.get(placeKey(item.lat, item.lng));
+    if (!place) return item;
+    return { ...item, state: place.state || '', district: item.district || place.city || '' };
+  };
+
   const feed = useMemo(() => {
     const sos = sosPings.map((s) => ({ ...s, kind: 'sos' }));
     const road = roadAlerts.map((a) => ({ ...a, kind: 'road' }));
-    let items = [...driverSos, ...sos, ...road, ...liveRoadAlerts].sort((a, b) => b.timestamp - a.timestamp);
+    let items = [...driverSos, ...sos, ...road, ...liveRoadAlerts]
+      .map(withResolvedRegion)
+      .sort((a, b) => b.timestamp - a.timestamp);
     items = items.filter((i) => (i.kind === 'sos' ? Boolean(resolved[i.id]) === (feedTab === 'resolved') : feedTab === 'active'));
     if (stateFilter !== 'All') items = items.filter((i) => i.state === stateFilter);
     if (search.trim()) {
@@ -1544,7 +1597,8 @@ export default function Dashboard({ alerts = [] }) {
       );
     }
     return items;
-  }, [sosPings, roadAlerts, driverSos, liveRoadAlerts, stateFilter, search, feedTab, resolved]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sosPings, roadAlerts, driverSos, liveRoadAlerts, stateFilter, search, feedTab, resolved, placeVersion]);
 
   const addSimulatedSOS = () => {
     const pick = DISTRICT_POOL[Math.floor(Math.random() * DISTRICT_POOL.length)];
@@ -2019,7 +2073,7 @@ export default function Dashboard({ alerts = [] }) {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search district, vehicle, cargo, route…"
+                placeholder="Search state, district, vehicle, cargo…"
                 className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-950/70 py-2 pl-8 pr-3 text-xs text-slate-800 dark:text-slate-200 placeholder:text-slate-500 dark:placeholder:text-slate-500 focus:border-sky-600 focus:outline-none"
               />
             </div>
