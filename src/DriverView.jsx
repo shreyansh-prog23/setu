@@ -508,7 +508,14 @@ function LocationField({ label, value, onChange, onSubmit, onChip, activeName, s
         <input
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          onFocus={() => setFocused(true)}
+          onFocus={(e) => {
+            setFocused(true);
+            // Select the pre-filled hub name on focus, like a browser address
+            // bar - otherwise typing appends to it (e.g. "Guwahati" + "Delh"
+            // becomes "GuwahatiDelh", which never matches a real place and
+            // looks exactly like the search being "stuck").
+            e.target.select();
+          }}
           onBlur={() => setFocused(false)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') onSubmit();
