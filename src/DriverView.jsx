@@ -647,28 +647,75 @@ function LocationField({ label, value, onChange, onSubmit, onChip, activeName, s
 // Compact SVG polyline preview so a driver-reported hazard's effect on the
 // route (visible detour, or unchanged path when clear) is actually visible,
 // not just implied by the distance/ETA numbers above it.
+// Perpendicular distance from point p to the line through a-b, in the same
+// (already-projected pixel) units - the standard building block for
+// Douglas-Peucker simplification below.
+function perpendicularDistance(p, a, b) {
+  if (a[0] === b[0] && a[1] === b[1]) return Math.hypot(p[0] - a[0], p[1] - a[1]);
+  const num = Math.abs((b[1] - a[1]) * p[0] - (b[0] - a[0]) * p[1] + b[0] * a[1] - b[1] * a[0]);
+  return num / Math.hypot(b[1] - a[1], b[0] - a[0]);
+}
+
+// A real TomTom route easily returns several thousand points - real, but at
+// GPS/lane-level precision. Plotting all of them into a ~300x100px preview
+// packed dozens of genuine tiny road wiggles into single pixels, which reads
+// as random noise rather than a route: exactly the "zigzag, can't tell
+// anything" problem. Simplifying to the shape's actual turns (dropping
+// points a straight segment already passes near) fixes that without lying
+// about the path - it is still every turn that matters, just not every
+// GPS sample along the way.
+function simplifyPolyline(points, tolerancePx) {
+  if (points.length <= 2) return points;
+  let maxDist = 0;
+  let maxIndex = 0;
+  const [first, last] = [points[0], points[points.length - 1]];
+  for (let i = 1; i < points.length - 1; i++) {
+    const d = perpendicularDistance(points[i], first, last);
+    if (d > maxDist) {
+      maxDist = d;
+      maxIndex = i;
+    }
+  }
+  if (maxDist <= tolerancePx) return [first, last];
+  const left = simplifyPolyline(points.slice(0, maxIndex + 1), tolerancePx);
+  const right = simplifyPolyline(points.slice(maxIndex), tolerancePx);
+  return [...left.slice(0, -1), ...right];
+}
+
 function RoutePreviewMap({ coordinates, hazards, hazardDetected }) {
   if (!coordinates || coordinates.length < 2) return null;
   const W = 300;
   const H = 120;
+  const PAD = 10;
   const lats = coordinates.map((c) => c[0]);
   const lngs = coordinates.map((c) => c[1]);
-  const latSpan = Math.max(...lats) - Math.min(...lats) || 0.1;
-  const lngSpan = Math.max(...lngs) - Math.min(...lngs) || 0.1;
-  const minLat = Math.min(...lats) - latSpan * 0.1;
-  const maxLat = Math.max(...lats) + latSpan * 0.1;
-  const minLng = Math.min(...lngs) - lngSpan * 0.1;
-  const maxLng = Math.max(...lngs) + lngSpan * 0.1;
+  const latSpan = Math.max(...lats) - Math.min(...lats) || 0.0005;
+  const lngSpan = Math.max(...lngs) - Math.min(...lngs) || 0.0005;
+  const midLat = (Math.max(...lats) + Math.min(...lats)) / 2;
+  const midLng = (Math.max(...lngs) + Math.min(...lngs)) / 2;
+  // A degree of longitude is shorter than a degree of latitude away from the
+  // equator - projecting both spans onto the box unscaled (the old behaviour)
+  // stretched whichever axis was relatively wider, bending real gentle curves
+  // into sharper, less recognizable ones. Scaling longitude by cos(latitude)
+  // keeps the route's actual shape instead of distorting it to fill the box.
+  const lngScale = Math.cos((midLat * Math.PI) / 180);
+  const scaledLatSpan = latSpan;
+  const scaledLngSpan = lngSpan * lngScale;
+  const scale = Math.min((W - PAD * 2) / (scaledLngSpan || 1), (H - PAD * 2) / (scaledLatSpan || 1));
   const project = (lat, lng) => ({
-    x: ((lng - minLng) / (maxLng - minLng)) * W,
-    y: ((maxLat - lat) / (maxLat - minLat)) * H,
+    x: W / 2 + (lng - midLng) * lngScale * scale,
+    y: H / 2 - (lat - midLat) * scale,
   });
-  const points = coordinates
-    .map(([lat, lng]) => {
-      const p = project(lat, lng);
-      return `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
-    })
-    .join(' ');
+
+  const projected = coordinates.map(([lat, lng]) => {
+    const p = project(lat, lng);
+    return [p.x, p.y];
+  });
+  // ~1.5px tolerance at this canvas size keeps every real turn while cutting
+  // a several-thousand-point route down to the few dozen vertices that
+  // actually change direction.
+  const simplified = simplifyPolyline(projected, 1.5);
+  const points = simplified.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="h-[100px] w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-950/70">
