@@ -149,6 +149,21 @@ def init_db() -> None:
             )
             """
         )
+        # Separate from driver_sessions on purpose - an operator (a government/
+        # command-center user) isn't a driver, and this table intentionally has
+        # no link to the `drivers` table so official phone numbers never mix
+        # with driver data. Same shape, same Twilio Verify mechanism, different
+        # table - this is what gates the Command Center now that SOS reporting
+        # itself no longer requires a login.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS operator_sessions (
+                token TEXT PRIMARY KEY,
+                phone_number TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
 
 
 def insert_hazard(
@@ -492,3 +507,32 @@ def delete_driver_session(token: str) -> None:
     rather than just having the client forget it locally."""
     with _connect() as conn:
         conn.execute("DELETE FROM driver_sessions WHERE token = ?", (token,))
+
+
+def create_operator_session(phone_number: str) -> str:
+    """Issues a new opaque session token for an already Twilio-Verify'd
+    phone number - the Command Center login. Mirrors create_driver_session
+    exactly, but writes to operator_sessions, not driver_sessions."""
+    token = secrets.token_urlsafe(32)
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO operator_sessions (token, phone_number, created_at) VALUES (?, ?, ?)",
+            (token, phone_number, datetime.now(timezone.utc).isoformat()),
+        )
+    return token
+
+
+def get_operator_by_session(token: str) -> Optional[str]:
+    """Resolves a Command Center session token to the verified phone number
+    behind it - this is what verify_operator_session (security.py) checks
+    on every Command-Center-only request."""
+    with _connect() as conn:
+        row = conn.execute("SELECT phone_number FROM operator_sessions WHERE token = ?", (token,)).fetchone()
+        return row["phone_number"] if row else None
+
+
+def delete_operator_session(token: str) -> None:
+    """Sign-out for the Command Center - removes the session row so the old
+    token can't be reused."""
+    with _connect() as conn:
+        conn.execute("DELETE FROM operator_sessions WHERE token = ?", (token,))

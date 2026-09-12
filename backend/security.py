@@ -45,3 +45,17 @@ def verify_driver_session(x_driver_token: Optional[str] = Header(None, alias="X-
     if not phone_number:
         raise HTTPException(status_code=401, detail="Not logged in - missing or invalid driver session.")
     return phone_number
+
+
+def verify_operator_session(x_operator_token: Optional[str] = Header(None, alias="X-Operator-Token")) -> str:
+    """Dependency for Command-Center-only endpoints (viewing/dispatching
+    live SOS data, recovery analytics, heat zones). SOS reporting itself is
+    deliberately open (no login - see main.py's module docstring for why);
+    this is the real gate on the sensitive side instead - viewing verified
+    reporters' contact info and dispatching resources requires a real,
+    Twilio-verified operator phone number, not just the shared API key
+    every frontend request already carries."""
+    phone_number = database.get_operator_by_session(x_operator_token) if x_operator_token else None
+    if not phone_number:
+        raise HTTPException(status_code=401, detail="Not logged in - missing or invalid operator session.")
+    return phone_number

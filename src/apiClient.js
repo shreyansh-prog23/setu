@@ -37,14 +37,41 @@ export function clearDriverSession() {
   localStorage.removeItem(DRIVER_PHONE_KEY);
 }
 
+// Operator session (Command Center login) - deliberately separate storage
+// keys and a separate backend table (operator_sessions, not drivers/
+// driver_sessions) from the driver session above. SOS reporting itself no
+// longer requires any login (see backend/main.py's SOSReport docstring for
+// why); this is the real gate on the sensitive side instead - viewing live
+// reports/contact info and dispatching now requires this session.
+const OPERATOR_TOKEN_KEY = 'setu_operator_token';
+const OPERATOR_PHONE_KEY = 'setu_operator_phone';
+
+export function getOperatorSession() {
+  const token = localStorage.getItem(OPERATOR_TOKEN_KEY);
+  const phone = localStorage.getItem(OPERATOR_PHONE_KEY);
+  return token && phone ? { token, phone } : null;
+}
+
+export function setOperatorSession(token, phone) {
+  localStorage.setItem(OPERATOR_TOKEN_KEY, token);
+  localStorage.setItem(OPERATOR_PHONE_KEY, phone);
+}
+
+export function clearOperatorSession() {
+  localStorage.removeItem(OPERATOR_TOKEN_KEY);
+  localStorage.removeItem(OPERATOR_PHONE_KEY);
+}
+
 export function apiFetch(path, options = {}) {
   const driverToken = localStorage.getItem(DRIVER_TOKEN_KEY);
+  const operatorToken = localStorage.getItem(OPERATOR_TOKEN_KEY);
   return fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers: {
       ...(options.headers || {}),
       'X-API-Key': API_KEY,
       ...(driverToken ? { 'X-Driver-Token': driverToken } : {}),
+      ...(operatorToken ? { 'X-Operator-Token': operatorToken } : {}),
     },
   });
 }

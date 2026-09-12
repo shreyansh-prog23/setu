@@ -53,7 +53,7 @@ from routing import RoutingServiceError, calculate_route
 from schemas import RouteRequest, RouteResponse
 from heat_zones import compute_heat_zones
 from voice_service import process_voice_sos
-from security import verify_api_key, verify_driver_session
+from security import verify_api_key, verify_operator_session
 
 load_dotenv()  # picks up TOMTOM_API_KEY etc. from a .env file if present
 
@@ -157,9 +157,13 @@ class ActiveSosResponse(BaseModel):
 
 
 class SOSReport(BaseModel):
-    # No truck_id field - the reporter's identity comes from their verified
-    # driver session (see verify_driver_session/create_sos below), not
-    # anything the client asserts in the request body.
+    # Reporting an SOS is deliberately NOT behind a login anymore - a driver
+    # in a real emergency shouldn't have to verify an OTP before getting
+    # help, the same way calling 112 doesn't verify your identity before
+    # dispatching. contact_phone is optional, self-reported, unverified -
+    # purely so a responder has a number to call back on, not a security
+    # credential. Command Center's own login (verify_operator_session) is
+    # the real gate now; see that dependency's docstring in security.py.
     # Bounded to India's bbox (matches the frontend map's INDIA_BOUNDS), not
     # just "a valid Earth coordinate" - a real distress call can't originate
     # outside the country this system covers.
@@ -177,6 +181,7 @@ class SOSReport(BaseModel):
     severity: Optional[str] = None
     notes: Optional[str] = None
     people_affected: Optional[int] = None
+    contact_phone: Optional[str] = None
 
 
 class DriverLoginStartRequest(BaseModel):
@@ -189,6 +194,11 @@ class DriverLoginVerifyRequest(BaseModel):
 
 
 class DriverLoginResponse(BaseModel):
+    token: str
+    phone_number: str
+
+
+class OperatorLoginResponse(BaseModel):
     token: str
     phone_number: str
 
@@ -282,7 +292,7 @@ async def sms_webhook(From: str = Form(...), Body: str = Form(...)):
     )
 
 
-@app.get("/api/alerts", response_model=List[Alert], dependencies=[Depends(verify_api_key)])
+@app.get("/api/alerts", response_model=List[Alert], dependencies=[Depends(verify_api_key), Depends(verify_operator_session)])
 async def get_alerts():
     return alerts_db
 
@@ -322,7 +332,7 @@ async def report_hazard(report: HazardReport):
     }
 
 
-@app.get("/api/hazards", response_model=List[HazardRecord], dependencies=[Depends(verify_api_key)])
+@app.get("/api/hazards", response_model=List[HazardRecord], dependencies=[Depends(verify_api_key), Depends(verify_operator_session)])
 async def get_hazards():
     """Active (non-expired) driver-reported hazards, for the Command Center
     map/feed to poll - see POST /api/alerts above for how these are created
@@ -330,7 +340,7 @@ async def get_hazards():
     return database.get_active_hazards()
 
 
-@app.get("/api/whatsapp/rejected", dependencies=[Depends(verify_api_key)])
+@app.get("/api/whatsapp/rejected", dependencies=[Depends(verify_api_key), Depends(verify_operator_session)])
 async def get_rejected_voice_messages():
     """Recent WhatsApp voice messages the AI triage classified as not a real
     emergency (see /api/whatsapp-webhook) - never became an SOS alert, this
@@ -340,18 +350,23 @@ async def get_rejected_voice_messages():
 
 
 @app.post("/api/sos", response_model=Alert, dependencies=[Depends(verify_api_key)])
-async def create_sos(report: SOSReport, driver_phone: str = Depends(verify_driver_session)):
+async def create_sos(report: SOSReport):
     # reason used to always be report.status, which is the fixed literal
     # "DISPATCH_TRIGGERED" - every online SOS showed that same useless
     # string as its description on the Command Center instead of whatever
     # the driver actually typed (e.g. "3 people trapped, need rescue").
+    #
+    # No login required to reach this endpoint anymore (see SOSReport's
+    # docstring) - contact_phone is whatever the reporter optionally typed
+    # in at the moment of the SOS, unverified. "Anonymous" if they left it
+    # blank, same as a genuinely anonymous emergency call.
     return _make_alert(
         lat=report.latitude,
         lng=report.longitude,
         cargo=report.priority,
         reason=report.notes or "No additional details provided.",
         source="ONLINE SOS REPORT",
-        reported_by=driver_phone,
+        reported_by=(report.contact_phone or "Anonymous").strip() or "Anonymous",
         people_affected=report.people_affected,
     )
 
@@ -389,6 +404,40 @@ async def driver_logout(x_driver_token: Optional[str] = Header(None, alias="X-Dr
     sign-out."""
     if x_driver_token:
         database.delete_driver_session(x_driver_token)
+    return {"signed_out": True}
+
+
+@app.post("/api/operator/login/start", dependencies=[Depends(verify_api_key)])
+async def operator_login_start(body: DriverLoginStartRequest):
+    """Command Center login, step 1. Same Twilio Verify call as driver
+    login (driver_auth.send_verification_code doesn't care what the phone
+    number is for) - just a different login surface, gating a different
+    part of the app."""
+    try:
+        await driver_auth.send_verification_code(body.phone_number)
+    except driver_auth.VerifyError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"sent": True}
+
+
+@app.post("/api/operator/login/verify", response_model=OperatorLoginResponse, dependencies=[Depends(verify_api_key)])
+async def operator_login_verify(body: DriverLoginVerifyRequest):
+    """Command Center login, step 2. On a correct code, issues an operator
+    session token (operator_sessions table) - deliberately NOT the drivers
+    table, so an official's phone number is never mixed with driver data."""
+    approved = await driver_auth.check_verification_code(body.phone_number, body.code)
+    if not approved:
+        raise HTTPException(status_code=401, detail="Incorrect or expired code.")
+    token = database.create_operator_session(body.phone_number)
+    return OperatorLoginResponse(token=token, phone_number=body.phone_number)
+
+
+@app.post("/api/operator/logout", dependencies=[Depends(verify_api_key)])
+async def operator_logout(x_operator_token: Optional[str] = Header(None, alias="X-Operator-Token")):
+    """Deletes the operator session row server-side, same reasoning as
+    driver_logout above."""
+    if x_operator_token:
+        database.delete_operator_session(x_operator_token)
     return {"signed_out": True}
 
 
@@ -486,7 +535,7 @@ async def whatsapp_listener_voice_sos(file: UploadFile = File(...), phone: str =
     return _finalize_voice_sos(row, phone)
 
 
-@app.post("/api/sos/{alert_id}/dispatch", response_model=Alert, dependencies=[Depends(verify_api_key)])
+@app.post("/api/sos/{alert_id}/dispatch", response_model=Alert, dependencies=[Depends(verify_api_key), Depends(verify_operator_session)])
 async def dispatch_sos(alert_id: int, body: DispatchRequest = DispatchRequest()):
     """Direct status transition for one SOS alert - no clustering, no
     aggregation. Defaults to 'DISPATCHED'; pass {"status": "RESOLVED"} to
@@ -505,7 +554,7 @@ async def dispatch_sos(alert_id: int, body: DispatchRequest = DispatchRequest())
     return updated
 
 
-@app.get("/api/sos/active", response_model=ActiveSosResponse, dependencies=[Depends(verify_api_key)])
+@app.get("/api/sos/active", response_model=ActiveSosResponse, dependencies=[Depends(verify_api_key), Depends(verify_operator_session)])
 async def get_active_sos():
     """PENDING SOS alerts only, plus the count - the number the Command
     Center header counter and the map's SOS pins are driven from. A fresh,
@@ -517,14 +566,14 @@ async def get_active_sos():
     )
 
 
-@app.get("/api/sos/resolved", response_model=List[Alert], dependencies=[Depends(verify_api_key)])
+@app.get("/api/sos/resolved", response_model=List[Alert], dependencies=[Depends(verify_api_key), Depends(verify_operator_session)])
 async def get_resolved_sos():
     """The "after"-phase resolved feed - closed-out SOS alerts, most
     recently resolved first, for the Command Center's Resolved tab."""
     return [_alert_from_row(r) for r in database.get_resolved_sos_alerts()]
 
 
-@app.get("/api/recovery/stats", response_model=RecoveryStats, dependencies=[Depends(verify_api_key)])
+@app.get("/api/recovery/stats", response_model=RecoveryStats, dependencies=[Depends(verify_api_key), Depends(verify_operator_session)])
 async def get_recovery_stats():
     """The "after"-phase recovery analytics panel's numbers - resolved
     counts and average response/recovery times, computed fresh from
@@ -536,7 +585,7 @@ class BulkDispatchRequest(BaseModel):
     alert_ids: List[int]
 
 
-@app.get("/api/clusters/heat-zones", dependencies=[Depends(verify_api_key)])
+@app.get("/api/clusters/heat-zones", dependencies=[Depends(verify_api_key), Depends(verify_operator_session)])
 async def get_heat_zones():
     """Isolated aggregation layer - reads existing PENDING alerts, groups
     them (5km/2hr, stdlib math only), touches no schema and no existing
@@ -544,7 +593,7 @@ async def get_heat_zones():
     return compute_heat_zones(database.get_active_sos_alerts())
 
 
-@app.post("/api/clusters/dispatch", dependencies=[Depends(verify_api_key)])
+@app.post("/api/clusters/dispatch", dependencies=[Depends(verify_api_key), Depends(verify_operator_session)])
 async def dispatch_heat_zone(body: BulkDispatchRequest):
     """Bulk status flip for a whole heat zone in one query - reuses the same
     'status' column /api/sos/{id}/dispatch already uses, so the active-SOS
@@ -589,7 +638,7 @@ async def hazard_check_endpoint(lat: float, lon: float):
     return await evaluate_point_with_trend(lat, lon)
 
 
-@app.get("/api/geocode/reverse", dependencies=[Depends(verify_api_key)])
+@app.get("/api/geocode/reverse", dependencies=[Depends(verify_api_key), Depends(verify_operator_session)])
 async def geocode_reverse_endpoint(lat: float, lon: float):
     """
     Coordinates -> {"city", "state"} for labeling map markers (SOS/hazard

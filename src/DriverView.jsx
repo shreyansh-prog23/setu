@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { apiFetch, getDriverSession, setDriverSession, clearDriverSession } from './apiClient';
+import { apiFetch } from './apiClient';
 import { queuePendingRequest, getPendingCount, onQueueChange } from './offlineQueue';
 import {
   Truck, Wifi, WifiOff, ShieldAlert, ArrowRight, AlertTriangle,
   Navigation, Siren, CheckCircle2, Send, X, ImagePlus, ChevronDown,
   MapPin, Loader2, Mountain, Waves, Wrench, HeartPulse, Construction,
-  Clock, Info, TrendingUp, Phone, LogOut,
+  Clock, Info, TrendingUp,
 } from 'lucide-react';
 
 const cx = (...a) => a.filter(Boolean).join(' ');
@@ -265,14 +265,15 @@ function getSosCoords() {
 }
 
 async function dispatchSos(lat, lng, details = {}) {
-  const { incidentType = INSTANT_SOS_CATEGORY, severity = 'Critical', notes = '', mode = 'instant', peopleAffected = null } = details;
+  const { incidentType = INSTANT_SOS_CATEGORY, severity = 'Critical', notes = '', mode = 'instant', peopleAffected = null, contactPhone = '' } = details;
   const requestOptions = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      // No truck_id here - the backend derives the real reporter identity
-      // from the logged-in driver's session token (X-Driver-Token, sent
-      // automatically by apiFetch), not anything the client asserts.
+      // No login required to send an SOS - a real emergency shouldn't wait
+      // on an OTP. contact_phone is optional and self-reported (whatever
+      // the reporter typed in at this moment, if anything), purely so a
+      // responder has a number to call back on - not a security credential.
       latitude: lat,
       longitude: lng,
       timestamp: new Date().toISOString(),
@@ -289,6 +290,7 @@ async function dispatchSos(lat, lng, details = {}) {
       notes,
       mode,
       people_affected: peopleAffected,
+      contact_phone: contactPhone.trim() || null,
     }),
   };
   // A real network failure (not just the manual "Zero Network" demo toggle
@@ -297,16 +299,6 @@ async function dispatchSos(lat, lng, details = {}) {
   // throw and get silently swallowed by the caller's catch block.
   try {
     const res = await apiFetch('/api/sos', requestOptions);
-    if (res.status === 401) {
-      // The session token is dead (not just this one request failing) -
-      // retrying with the same token would never succeed, so surface it
-      // immediately here rather than waiting for the next background
-      // flush pass to notice the same thing (see offlineQueue.js). The
-      // report itself still queues below so it auto-sends the moment the
-      // driver logs back in with a fresh token.
-      clearDriverSession();
-      window.dispatchEvent(new Event('driver-session-expired'));
-    }
     if (!res.ok) throw new Error(`SOS dispatch failed (${res.status})`);
   } catch (err) {
     queuePendingRequest('/api/sos', requestOptions);
@@ -502,133 +494,6 @@ function Modal({ onClose, children }) {
   );
 }
 
-// One-time phone login (Twilio Verify, see backend/driver_auth.py) - gates
-// the whole screen, not just the SOS button, so every action a driver takes
-// here (SOS, route planning, hazard reports) is tied to a real, server-
-// verified identity rather than the old hardcoded 'TRK-IN-0921'. Only the
-// login itself needs connectivity - once logged in, the session token is
-// read from localStorage on every request (see apiClient.js), so the app
-// stays exactly as offline-capable as before for everything after this.
-function DriverLoginGate({ onLoggedIn, notice }) {
-  const [step, setStep] = useState('phone'); // 'phone' | 'code'
-  const [phone, setPhone] = useState('');
-  const [code, setCode] = useState('');
-  const [error, setError] = useState(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  const digits = phone.replace(/\D/g, '');
-  const e164 = `+91${digits}`;
-
-  const sendCode = async () => {
-    if (digits.length !== 10) { setError('Enter a 10-digit phone number.'); return; }
-    setSubmitting(true);
-    setError(null);
-    try {
-      const res = await apiFetch('/api/driver/login/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone_number: e164 }),
-      });
-      if (!res.ok) throw new Error('Could not send code. Check the number and try again.');
-      setStep('code');
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const verifyCode = async () => {
-    if (!code.trim()) { setError('Enter the code you received.'); return; }
-    setSubmitting(true);
-    setError(null);
-    try {
-      const res = await apiFetch('/api/driver/login/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone_number: e164, code: code.trim() }),
-      });
-      if (!res.ok) throw new Error('Incorrect or expired code.');
-      const data = await res.json();
-      onLoggedIn(data.token, data.phone_number);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="flex min-h-screen w-full items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
-      <div className="w-full max-w-[400px] rounded-[2rem] border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-6 shadow-2xl">
-        <div className="mb-6 flex flex-col items-center gap-2 text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-sky-500/15 text-sky-600 dark:text-sky-400">
-            <Phone size={22} />
-          </div>
-          <h1 className="text-sm font-bold text-slate-900 dark:text-slate-100">Driver Login</h1>
-          <p className="text-[12px] text-slate-500 dark:text-slate-500">Verify your phone once — stays signed in until you sign out.</p>
-        </div>
-
-        {notice && (
-          <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] text-amber-600 dark:text-amber-300">
-            <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-            <span>{notice}</span>
-          </div>
-        )}
-
-        {step === 'phone' ? (
-          <div className="space-y-3">
-            <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400">Phone Number</label>
-            <div className="flex items-center gap-2">
-              <span className="rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/70 px-3 py-2.5 text-[13px] text-slate-500 dark:text-slate-400">+91</span>
-              <input
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="98XXXXXXXX"
-                inputMode="numeric"
-                maxLength={10}
-                className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-950/70 px-3 py-2.5 text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-600 dark:placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
-              />
-            </div>
-            {error && <p className="text-[11px] text-red-600 dark:text-red-400">{error}</p>}
-            <button
-              onClick={sendCode}
-              disabled={submitting}
-              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-sky-600 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:opacity-50"
-            >
-              {submitting ? <Loader2 size={15} className="animate-spin" /> : <Send size={14} />}
-              {submitting ? 'Sending…' : 'Send Code'}
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400">Code sent to +91 {digits}</label>
-            <input
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              placeholder="6-digit code"
-              inputMode="numeric"
-              className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-950/70 px-3 py-2.5 text-center text-[15px] tracking-[0.3em] text-slate-800 dark:text-slate-200 placeholder:text-slate-600 dark:placeholder:text-slate-600 placeholder:tracking-normal focus:border-sky-600 focus:outline-none"
-            />
-            {error && <p className="text-[11px] text-red-600 dark:text-red-400">{error}</p>}
-            <button
-              onClick={verifyCode}
-              disabled={submitting}
-              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-sky-600 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:opacity-50"
-            >
-              {submitting ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={14} />}
-              {submitting ? 'Verifying…' : 'Verify'}
-            </button>
-            <button onClick={() => { setStep('phone'); setCode(''); setError(null); }} className="w-full text-center text-[11px] text-slate-500 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300">
-              Use a different number
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function LocationField({ label, value, onChange, onSubmit, onChip, activeName, suggestions, suggestStatus, onSelectSuggestion }) {
   const [focused, setFocused] = useState(false);
   const showSuggestions = focused && suggestions.length > 0;
@@ -748,8 +613,6 @@ function RoutePreviewMap({ coordinates, hazards, hazardDetected }) {
 }
 
 export default function DriverView({ onTriggerSOS }) {
-  const [driverSession, setDriverSessionState] = useState(() => getDriverSession());
-  const [sessionExpiredNotice, setSessionExpiredNotice] = useState(null);
   const [pendingCount, setPendingCount] = useState(() => getPendingCount());
   const [online, setOnline] = useState(true);
   const [activeModal, setActiveModal] = useState(null); // 'sos-online' | 'sos-offline' | 'sos-report' | 'obstacle' | null
@@ -778,6 +641,11 @@ export default function DriverView({ onTriggerSOS }) {
   const [incidentSeverity, setIncidentSeverity] = useState('Critical');
   const [incidentNote, setIncidentNote] = useState('');
   const [incidentPeopleAffected, setIncidentPeopleAffected] = useState('');
+  // Optional, unverified callback number - typed in whenever the reporter
+  // wants (before or during either SOS path below), never required to send.
+  // See dispatchSos/backend main.py's SOSReport docstring for why there's no
+  // login requirement here at all anymore.
+  const [contactPhone, setContactPhone] = useState('');
 
   const [sourceInput, setSourceInput] = useState('Guwahati');
   const [destInput, setDestInput] = useState('Silchar');
@@ -828,23 +696,6 @@ export default function DriverView({ onTriggerSOS }) {
     return unsubscribe;
   }, []);
 
-  // A queued SOS/report can fail forever with a dead session token (see
-  // dispatchSos/offlineQueue.js - most commonly after the backend's
-  // database gets wiped by a redeploy, since Render's free tier has no
-  // persistent disk, orphaning every token issued before it). That code
-  // clears the stored token and fires this event instead of retrying
-  // blindly - drop back to the login gate so the driver visibly has to
-  // re-verify, rather than the app silently sitting "logged in" while
-  // every real send 401s. The queued report itself is untouched and will
-  // send automatically on the next retry once they're logged in again.
-  useEffect(() => {
-    const onExpired = () => {
-      setDriverSessionState(null);
-      setSessionExpiredNotice('Your session expired, likely after a server update. Please log in again — your queued report will send automatically once you do.');
-    };
-    window.addEventListener('driver-session-expired', onExpired);
-    return () => window.removeEventListener('driver-session-expired', onExpired);
-  }, []);
 
   // Passive "entering a high-risk area" watch - runs the whole time this
   // screen is open, independent of whether a route is planned. Continuous
@@ -1027,15 +878,6 @@ export default function DriverView({ onTriggerSOS }) {
     setDestCoords(null);
   };
 
-  // Deletes the session row server-side (see /api/driver/logout) so the old
-  // token can't keep being used after sign-out, not just something this
-  // device forgets locally - then drops back to the login gate.
-  const signOut = () => {
-    apiFetch('/api/driver/logout', { method: 'POST' }).catch(() => {});
-    clearDriverSession();
-    setDriverSessionState(null);
-  };
-
   const toggleOnline = () => {
     setOnline((o) => {
       const next = !o;
@@ -1046,7 +888,7 @@ export default function DriverView({ onTriggerSOS }) {
 
   // Shared dispatch path for both Instant SOS (long-press) and the Detailed
   // Incident Report modal — both capture live GPS and POST to /api/sos.
-  const dispatchIncident = async ({ category, severity, note, source, peopleAffected }) => {
+  const dispatchIncident = async ({ category, severity, note, source, peopleAffected, contactPhone: phoneArg = '' }) => {
     const isOffline = !online;
     // Immediate feedback the instant the hold completes/tap registers -
     // without this, the gap between releasing the button and the real
@@ -1084,7 +926,7 @@ export default function DriverView({ onTriggerSOS }) {
       // offlineQueue.js) instead of the report just vanishing once this
       // toast disappears - this used to be a purely local simulation with
       // no real send attempted at all.
-      dispatchSos(lat, lng, { incidentType: category, severity, notes: note, mode: source, peopleAffected }).catch(() => {});
+      dispatchSos(lat, lng, { incidentType: category, severity, notes: note, mode: source, peopleAffected, contactPhone: phoneArg }).catch(() => {});
       setToast('SOS queued — will send automatically once signal returns');
     } else {
       // Success is shown only once the send is actually confirmed - this
@@ -1095,7 +937,7 @@ export default function DriverView({ onTriggerSOS }) {
       // it for silent background retry instead.
       let delivered = false;
       try {
-        await dispatchSos(lat, lng, { incidentType: category, severity, notes: note, mode: source, peopleAffected });
+        await dispatchSos(lat, lng, { incidentType: category, severity, notes: note, mode: source, peopleAffected, contactPhone: phoneArg });
         delivered = true;
       } catch (err) {
         console.warn('SOS backend dispatch failed, queued for automatic retry:', err);
@@ -1146,7 +988,7 @@ export default function DriverView({ onTriggerSOS }) {
     holdCompletedResetTimer.current = setTimeout(() => {
       holdCompletedRef.current = false;
     }, 500);
-    dispatchIncident({ category: INSTANT_SOS_CATEGORY, severity: 'Critical', note: '', source: 'instant' });
+    dispatchIncident({ category: INSTANT_SOS_CATEGORY, severity: 'Critical', note: '', source: 'instant', contactPhone });
   };
 
   const startHold = () => {
@@ -1194,6 +1036,7 @@ export default function DriverView({ onTriggerSOS }) {
       note: incidentNote.trim(),
       source: 'detailed',
       peopleAffected: Number.isFinite(peopleAffected) ? peopleAffected : null,
+      contactPhone,
     });
   };
 
@@ -1244,19 +1087,6 @@ export default function DriverView({ onTriggerSOS }) {
     setIncidentPeopleAffected('');
   };
 
-  if (!driverSession) {
-    return (
-      <DriverLoginGate
-        notice={sessionExpiredNotice}
-        onLoggedIn={(token, phone) => {
-          setDriverSession(token, phone);
-          setDriverSessionState({ token, phone });
-          setSessionExpiredNotice(null);
-        }}
-      />
-    );
-  }
-
   return (
     <div className="flex min-h-screen w-full items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
       <div className="relative flex h-[800px] w-full max-w-[400px] flex-col overflow-y-auto overflow-x-hidden rounded-[2rem] border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 shadow-2xl">
@@ -1271,10 +1101,7 @@ export default function DriverView({ onTriggerSOS }) {
           <div className="flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-1.5 text-slate-900 dark:text-slate-100">
               <Truck size={16} className="shrink-0 text-sky-600 dark:text-sky-400" />
-              <span className="truncate text-sm font-bold tracking-wide">{driverSession.phone}</span>
-              <button onClick={signOut} title="Sign out" className="ml-1 shrink-0 text-slate-500 dark:text-slate-500 transition hover:text-red-600 dark:hover:text-red-400">
-                <LogOut size={14} />
-              </button>
+              <span className="truncate text-sm font-bold tracking-wide">Driver Mobile View</span>
             </div>
             <button
               onClick={toggleOnline}
@@ -1446,6 +1273,15 @@ export default function DriverView({ onTriggerSOS }) {
           <p className="text-[11px] text-slate-500 dark:text-slate-500">
             Tap to report an incident · Hold {(HOLD_MS / 1000).toFixed(1)}s for instant SOS
           </p>
+          <div className="w-full max-w-[280px]">
+            <input
+              value={contactPhone}
+              onChange={(e) => setContactPhone(e.target.value)}
+              placeholder="Your number (optional, so we can reach you)"
+              inputMode="tel"
+              className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-950/70 px-3 py-2 text-center text-[12px] text-slate-800 dark:text-slate-200 placeholder:text-slate-500 dark:placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
+            />
+          </div>
         </section>
 
         {/* Ground reporting */}
@@ -1653,6 +1489,17 @@ export default function DriverView({ onTriggerSOS }) {
                   onChange={(e) => setIncidentPeopleAffected(e.target.value.replace(/[^0-9]/g, ''))}
                   inputMode="numeric"
                   placeholder="e.g. 3"
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-950/70 px-3 py-2 text-[12px] text-slate-800 dark:text-slate-200 placeholder:text-slate-600 dark:placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">Your Number (optional, so we can reach you)</label>
+                <input
+                  value={contactPhone}
+                  onChange={(e) => setContactPhone(e.target.value)}
+                  inputMode="tel"
+                  placeholder="e.g. 98XXXXXXXX"
                   className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-950/70 px-3 py-2 text-[12px] text-slate-800 dark:text-slate-200 placeholder:text-slate-600 dark:placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
                 />
               </div>
