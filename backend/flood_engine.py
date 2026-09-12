@@ -53,14 +53,21 @@ FEATURE_DRIVER_LABELS = {
 
 _model = None
 _feature_importances: Optional[np.ndarray] = None
+# Plain argmax missed most real HIGH-flood-risk cases (recall 0.28 on a thin
+# 29-sample HIGH class) - see ml/train_flood_risk_model.py's threshold sweep
+# for the full reasoning, same tradeoff already applied to the earthquake
+# model. Overridable via the bundle so a re-trained model can carry its own
+# tuned value without a code change here.
+_high_risk_threshold = 0.35
 
 
 def load_flood_model() -> bool:
-    global _model, _feature_importances
+    global _model, _feature_importances, _high_risk_threshold
     try:
         bundle = joblib.load(MODEL_PATH)
         _model = bundle["model"]
         _feature_importances = np.asarray(_model.feature_importances_)
+        _high_risk_threshold = bundle.get("high_risk_decision_threshold", 0.35)
         logger.info("Flood risk model loaded from %s", MODEL_PATH)
         return True
     except Exception as exc:
@@ -196,7 +203,11 @@ def assess_flood_risk(
 
     if _model is not None:
         proba = _model.predict_proba([vector])[0]
-        predicted = int(np.argmax(proba))
+        # Matches how this model was actually evaluated in training
+        # (ml/train_flood_risk_model.py's _apply_decision_rule) - HIGH wins
+        # once P(HIGH) clears the lowered threshold, otherwise plain argmax
+        # between SAFE/MODERATE.
+        predicted = 2 if proba[2] >= _high_risk_threshold else int(np.argmax(proba[:2]))
         importances = _feature_importances
     else:
         predicted, proba = _rule_based_fallback(features)
